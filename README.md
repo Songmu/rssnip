@@ -44,6 +44,80 @@ By default, every item is emitted as one compact JSON object per line. Use
 `--url`, as positional arguments, or by combining both forms; output preserves
 feed and item order.
 
+### Output schema
+
+Without `--jq`, each JSON Lines record (or each `--json` array element)
+conforms to this JSON Schema:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "rssnip output item",
+  "type": "object",
+  "required": ["id", "_feed"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string" },
+    "url": { "type": "string" },
+    "external_url": { "type": "string" },
+    "title": { "type": "string" },
+    "content_html": { "type": "string" },
+    "content_text": { "type": "string" },
+    "summary": { "type": "string" },
+    "image": { "type": "string" },
+    "banner_image": { "type": "string" },
+    "date_published": { "type": "string", "format": "date-time" },
+    "date_modified": { "type": "string", "format": "date-time" },
+    "authors": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/author" }
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "attachments": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/attachment" }
+    },
+    "_feed": { "$ref": "#/$defs/feed" }
+  },
+  "$defs": {
+    "author": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "url": { "type": "string" },
+        "avatar": { "type": "string" }
+      }
+    },
+    "attachment": {
+      "type": "object",
+      "required": ["url", "mime_type"],
+      "additionalProperties": false,
+      "properties": {
+        "url": { "type": "string" },
+        "mime_type": { "type": "string" },
+        "title": { "type": "string" },
+        "size_in_bytes": { "type": "integer" },
+        "duration_in_seconds": { "type": "integer" }
+      }
+    },
+    "feed": {
+      "type": "object",
+      "required": ["feed_url"],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string" },
+        "home_page_url": { "type": "string" },
+        "feed_url": { "type": "string" }
+      }
+    }
+  }
+}
+```
+
 ### Date filtering
 
 `--since` and `--until` accept RFC 3339 timestamps or `YYYY-MM-DD` dates. Both
