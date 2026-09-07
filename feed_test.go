@@ -15,7 +15,7 @@ func TestParseFeedFormats(t *testing.T) {
 	}{
 		{
 			name: "RSS 2.0",
-			body: `<?xml version="1.0"?>
+			body: string([]byte{0xef, 0xbb, 0xbf}) + `<?xml version="1.0"?>
 <rss version="2.0">
   <channel>
     <title>RSS Feed</title>
@@ -71,7 +71,7 @@ func TestParseFeedFormats(t *testing.T) {
 		},
 		{
 			name: "JSON Feed 1.1",
-			body: `{
+			body: string([]byte{0xef, 0xbb, 0xbf}) + `{
   "version": "https://jsonfeed.org/version/1.1",
   "title": "JSON Feed",
   "home_page_url": "https://example.com/",

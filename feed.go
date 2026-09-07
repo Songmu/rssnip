@@ -93,7 +93,12 @@ type jsonFeedAttachment struct {
 }
 
 func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item, error) {
-	if _, err := url.ParseRequestURI(feedURL); err != nil {
+	parsedURL, err := url.ParseRequestURI(feedURL)
+	if err != nil || parsedURL.Host == "" ||
+		(parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+		if err == nil {
+			err = fmt.Errorf("must be an absolute HTTP or HTTPS URL")
+		}
 		return nil, fmt.Errorf("invalid feed URL %q: %w", feedURL, err)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
@@ -126,6 +131,7 @@ func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item
 }
 
 func parseFeed(body []byte, sourceURL string) ([]Item, error) {
+	body = bytes.TrimPrefix(body, []byte{0xef, 0xbb, 0xbf})
 	if looksLikeJSON(body) {
 		items, recognized, err := parseJSONFeed(body, sourceURL)
 		if err != nil {

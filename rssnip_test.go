@@ -145,6 +145,8 @@ func TestRunErrors(t *testing.T) {
 		{"invalid since", []string{"--since", "yesterday", "https://example.com/feed"}, "invalid --since"},
 		{"reversed period", []string{"--since", "2024-02-01", "--until", "2024-01-01", "https://example.com/feed"}, "--since must not be after --until"},
 		{"invalid URL", []string{"--jq", ".", "://bad"}, "invalid feed URL"},
+		{"relative URL", []string{"feed.xml"}, "invalid feed URL"},
+		{"non-HTTP URL", []string{"ftp://example.com/feed"}, "invalid feed URL"},
 	}
 	for _, tt := range tests {
 		tt := tt
