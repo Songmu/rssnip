@@ -155,6 +155,20 @@ func TestRunReportsHTTPError(t *testing.T) {
 	}
 }
 
+func TestRunRejectsOversizedFeed(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprint(maxFeedSize+1))
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{server.URL}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "feed exceeds 32 MiB limit") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestRunReportsInvalidJQ(t *testing.T) {
 	t.Parallel()
 	server := newFeedServer(t, testRSS)

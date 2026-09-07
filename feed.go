@@ -18,6 +18,7 @@ import (
 )
 
 const userAgent = "rssnip/" + version
+const maxFeedSize = 32 << 20
 
 // Item is a feed entry normalized to the JSON Feed 1.1 item shape.
 type Item struct {
@@ -112,9 +113,15 @@ func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 		return nil, fmt.Errorf("fetch %q: unexpected HTTP status %s", feedURL, resp.Status)
 	}
-	body, err := io.ReadAll(resp.Body)
+	if resp.ContentLength > maxFeedSize {
+		return nil, fmt.Errorf("read %q: feed exceeds %d MiB limit", feedURL, maxFeedSize>>20)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxFeedSize+1))
 	if err != nil {
 		return nil, fmt.Errorf("read %q: %w", feedURL, err)
+	}
+	if len(body) > maxFeedSize {
+		return nil, fmt.Errorf("read %q: feed exceeds %d MiB limit", feedURL, maxFeedSize>>20)
 	}
 	return parseFeed(body, feedURL)
 }
@@ -252,25 +259,25 @@ func formatTime(value *time.Time) string {
 	if value == nil {
 		return ""
 	}
-	return value.Format(time.RFC3339)
+	return value.Format(time.RFC3339Nano)
 }
 
 func normalizeDate(value string) string {
 	if value == "" {
 		return ""
 	}
-	parsed, err := time.Parse(time.RFC3339, value)
+	parsed, err := time.Parse(time.RFC3339Nano, value)
 	if err != nil {
 		return value
 	}
-	return parsed.Format(time.RFC3339)
+	return parsed.Format(time.RFC3339Nano)
 }
 
 func parseTimeBound(value string, endOfDay bool) (*time.Time, error) {
 	if value == "" {
 		return nil, nil
 	}
-	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
 		return &parsed, nil
 	}
 	parsed, err := time.Parse(time.DateOnly, value)
@@ -291,7 +298,7 @@ func withinPeriod(item Item, since, until *time.Time) bool {
 	if dateValue == "" {
 		return false
 	}
-	itemTime, err := time.Parse(time.RFC3339, dateValue)
+	itemTime, err := time.Parse(time.RFC3339Nano, dateValue)
 	if err != nil {
 		return false
 	}

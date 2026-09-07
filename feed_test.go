@@ -148,3 +148,18 @@ func TestWithinPeriod(t *testing.T) {
 		}
 	}
 }
+
+func TestFractionalSecondDates(t *testing.T) {
+	t.Parallel()
+	const value = "2024-01-15T12:00:00.123456789Z"
+	if got := normalizeDate(value); got != value {
+		t.Errorf("normalizeDate(%q) = %q", value, got)
+	}
+	since, err := parseTimeBound("2024-01-15T12:00:00.123Z", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !withinPeriod(Item{DatePublished: value}, since, nil) {
+		t.Error("fractional-second item should be included")
+	}
+}

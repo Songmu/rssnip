@@ -29,7 +29,7 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) err
 		fmt.Sprintf("%s (v%s rev:%s)", cmdName, version, revision), flag.ContinueOnError)
 	fs.SetOutput(errStream)
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: %s [options] --url URL [--url URL ...]\n\n", cmdName)
+		fmt.Fprintf(fs.Output(), "Usage: %s [options] [--url URL ...] [URL ...]\n\n", cmdName)
 		fmt.Fprintln(fs.Output(), "Options:")
 		fs.PrintDefaults()
 	}
