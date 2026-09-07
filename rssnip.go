@@ -71,21 +71,36 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) err
 	if since != nil && until != nil && since.After(*until) {
 		return fmt.Errorf("--since must not be after --until")
 	}
+	code, err := compileQuery(*jqExpression)
+	if err != nil {
+		return err
+	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
-	items := make([]Item, 0)
+	var items []Item
 	for _, feedURL := range urls {
 		feedItems, err := fetchFeed(ctx, client, feedURL)
 		if err != nil {
 			return err
 		}
+		filtered := feedItems[:0]
 		for _, item := range feedItems {
 			if withinPeriod(item, since, until) {
-				items = append(items, item)
+				filtered = append(filtered, item)
 			}
 		}
+		if *jsonOutput {
+			items = append(items, filtered...)
+			continue
+		}
+		if err := writeItemsWithCode(outStream, filtered, code, *rawOutput, false); err != nil {
+			return err
+		}
 	}
-	return writeItems(outStream, items, *jqExpression, *rawOutput, *jsonOutput)
+	if *jsonOutput {
+		return writeItemsWithCode(outStream, items, code, false, true)
+	}
+	return nil
 }
 
 func printVersion(out io.Writer) error {

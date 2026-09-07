@@ -95,6 +95,23 @@ func TestRunAcceptsMultipleURLsAndWritesJSONArray(t *testing.T) {
 	}
 }
 
+func TestRunStreamsJSONLinesBeforeLaterFeedFailure(t *testing.T) {
+	t.Parallel()
+	goodServer := newFeedServer(t, testRSS)
+	badServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "no", http.StatusBadGateway)
+	}))
+	t.Cleanup(badServer.Close)
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{goodServer.URL, badServer.URL}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "502 Bad Gateway") {
+		t.Fatalf("error = %v", err)
+	}
+	if lines := strings.Count(strings.TrimSpace(stdout.String()), "\n") + 1; lines != 4 {
+		t.Errorf("streamed lines = %d, want 4", lines)
+	}
+}
+
 func TestRunWritesJSONLinesByDefault(t *testing.T) {
 	t.Parallel()
 	server := newFeedServer(t, testRSS)

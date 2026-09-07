@@ -293,24 +293,21 @@ func withinPeriod(item Item, since, until *time.Time) bool {
 	if since == nil && until == nil {
 		return true
 	}
-	var itemTime time.Time
-	found := false
 	for _, dateValue := range []string{item.DatePublished, item.DateModified} {
 		if dateValue == "" {
 			continue
 		}
-		parsed, err := time.Parse(time.RFC3339Nano, dateValue)
-		if err == nil {
-			itemTime = parsed
-			found = true
-			break
+		itemTime, err := time.Parse(time.RFC3339Nano, dateValue)
+		if err != nil {
+			continue
 		}
+		if since != nil && itemTime.Before(*since) {
+			continue
+		}
+		if until != nil && itemTime.After(*until) {
+			continue
+		}
+		return true
 	}
-	if !found {
-		return false
-	}
-	if since != nil && itemTime.Before(*since) {
-		return false
-	}
-	return until == nil || !itemTime.After(*until)
+	return false
 }

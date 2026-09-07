@@ -10,19 +10,33 @@ import (
 )
 
 func writeItems(out io.Writer, items []Item, expression string, raw, asJSON bool) error {
-	var code *gojq.Code
-	if expression != "" {
-		query, err := gojq.Parse(expression)
-		if err != nil {
-			return fmt.Errorf("parse --jq expression: %w", err)
-		}
-		code, err = gojq.Compile(query)
-		if err != nil {
-			return fmt.Errorf("compile --jq expression: %w", err)
-		}
+	code, err := compileQuery(expression)
+	if err != nil {
+		return err
 	}
+	return writeItemsWithCode(out, items, code, raw, asJSON)
+}
 
-	results := make([]any, 0, len(items))
+func compileQuery(expression string) (*gojq.Code, error) {
+	if expression == "" {
+		return nil, nil
+	}
+	query, err := gojq.Parse(expression)
+	if err != nil {
+		return nil, fmt.Errorf("parse --jq expression: %w", err)
+	}
+	code, err := gojq.Compile(query)
+	if err != nil {
+		return nil, fmt.Errorf("compile --jq expression: %w", err)
+	}
+	return code, nil
+}
+
+func writeItemsWithCode(out io.Writer, items []Item, code *gojq.Code, raw, asJSON bool) error {
+	var results []any
+	if asJSON {
+		results = make([]any, 0, len(items))
+	}
 	encoder := json.NewEncoder(out)
 	encoder.SetEscapeHTML(false)
 	for _, item := range items {

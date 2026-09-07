@@ -165,6 +165,25 @@ func TestWithinPeriodFallsBackToModifiedDate(t *testing.T) {
 	}
 }
 
+func TestWithinPeriodAcceptsEitherPublishedOrModifiedDate(t *testing.T) {
+	t.Parallel()
+	since, err := parseTimeBound("2024-01-01", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	until, err := parseTimeBound("2024-01-31", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := Item{
+		DatePublished: "2023-12-01T00:00:00Z",
+		DateModified:  "2024-01-15T12:00:00Z",
+	}
+	if !withinPeriod(item, since, until) {
+		t.Error("item should be included when its modification date is in range")
+	}
+}
+
 func TestFractionalSecondDates(t *testing.T) {
 	t.Parallel()
 	const value = "2024-01-15T12:00:00.123456789Z"
