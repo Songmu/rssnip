@@ -18,3 +18,6 @@ attention to:
 Report concrete correctness, security, reliability, compatibility, and test
 coverage issues. Do not omit a finding merely because the affected code is
 small or already has a happy-path test.
+
+The repository intentionally targets Go 1.27. CI installs the current stable Go
+toolchain, so do not report the `go 1.27.0` directive as an unreleased version.

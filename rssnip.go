@@ -83,10 +83,13 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) err
 		if err != nil {
 			return err
 		}
-		filtered := feedItems[:0]
-		for _, item := range feedItems {
-			if withinPeriod(item, since, until) {
-				filtered = append(filtered, item)
+		filtered := feedItems
+		if since != nil || until != nil {
+			filtered = feedItems[:0]
+			for _, item := range feedItems {
+				if withinPeriod(item, since, until) {
+					filtered = append(filtered, item)
+				}
 			}
 		}
 		if *jsonOutput {
