@@ -25,7 +25,7 @@ func (ss *stringList) Set(value string) error {
 }
 
 // Run runs rssnip with the supplied command-line arguments.
-func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) error {
+func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (runErr error) {
 	fs := flag.NewFlagSet(
 		fmt.Sprintf("%s (v%s rev:%s)", cmdName, version, revision), flag.ContinueOnError)
 	fs.SetOutput(errStream)
@@ -84,6 +84,11 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) err
 		if _, err := fmt.Fprint(outStream, "["); err != nil {
 			return fmt.Errorf("write output: %w", err)
 		}
+		defer func() {
+			if _, err := fmt.Fprint(outStream, "]\n"); err != nil && runErr == nil {
+				runErr = fmt.Errorf("write output: %w", err)
+			}
+		}()
 		encoder = json.NewEncoder(outStream)
 		encoder.SetEscapeHTML(false)
 	}
@@ -120,11 +125,6 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) err
 		}
 		if err := writeItemsWithCodeContext(ctx, outStream, filtered, code, *rawOutput, false); err != nil {
 			return err
-		}
-	}
-	if *jsonOutput {
-		if _, err := fmt.Fprint(outStream, "]\n"); err != nil {
-			return fmt.Errorf("write output: %w", err)
 		}
 	}
 	return nil

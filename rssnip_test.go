@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -92,6 +93,66 @@ func TestRunAcceptsMultipleURLsAndWritesJSONArray(t *testing.T) {
 	}
 	if got := values[4]["feed"]; got != "Feed Two" {
 		t.Errorf("second feed = %v", got)
+	}
+}
+
+func TestRunJQZeroAndMultipleValuesInJSONArray(t *testing.T) {
+	t.Parallel()
+	server := newFeedServer(t, testRSS)
+
+	t.Run("empty", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		if err := Run(context.Background(), []string{
+			"--json", "--jq", "empty", server.URL,
+		}, &stdout, &stderr); err != nil {
+			t.Fatal(err)
+		}
+		if got := stdout.String(); got != "[]\n" {
+			t.Errorf("stdout = %q, want %q", got, "[]\n")
+		}
+	})
+
+	t.Run("multiple", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		if err := Run(context.Background(), []string{
+			"--json", "--jq", ".id, .title", server.URL,
+		}, &stdout, &stderr); err != nil {
+			t.Fatal(err)
+		}
+		var values []string
+		if err := json.Unmarshal(stdout.Bytes(), &values); err != nil {
+			t.Fatalf("invalid JSON output: %v\n%s", err, stdout.String())
+		}
+		want := []string{
+			"before", "Before", "first", "First",
+			"second", "Second", "after", "After",
+		}
+		if !reflect.DeepEqual(values, want) {
+			t.Errorf("values = %#v, want %#v", values, want)
+		}
+	})
+}
+
+func TestRunFinalizesJSONArrayAfterProcessingError(t *testing.T) {
+	t.Parallel()
+	goodServer := newFeedServer(t, testRSS)
+	badServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "no", http.StatusBadGateway)
+	}))
+	t.Cleanup(badServer.Close)
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{
+		"--json", goodServer.URL, badServer.URL,
+	}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "502 Bad Gateway") {
+		t.Fatalf("error = %v", err)
+	}
+	var values []Item
+	if jsonErr := json.Unmarshal(stdout.Bytes(), &values); jsonErr != nil {
+		t.Fatalf("invalid partial JSON output: %v\n%s", jsonErr, stdout.String())
+	}
+	if len(values) != 4 {
+		t.Fatalf("got %d values, want 4", len(values))
 	}
 }
 

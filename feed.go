@@ -346,15 +346,25 @@ func atomAuthors(base string, people []*atom.Person) []Author {
 }
 
 func withDocumentBase(body []byte, sourceURL string) []byte {
-	start := bytes.Index(bytes.ToLower(body), []byte("<feed"))
-	if start < 0 {
-		return body
+	decoder := xml.NewDecoder(bytes.NewReader(body))
+	var start, end int
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			return body
+		}
+		element, ok := token.(xml.StartElement)
+		if !ok || element.Name.Local != "feed" ||
+			element.Name.Space != "http://www.w3.org/2005/Atom" {
+			continue
+		}
+		end = int(decoder.InputOffset())
+		start = bytes.LastIndex(body[:end], []byte("<"))
+		if start < 0 {
+			return body
+		}
+		break
 	}
-	end := bytes.IndexByte(body[start:], '>')
-	if end < 0 {
-		return body
-	}
-	end += start
 	tag := body[start:end]
 	const baseAttribute = "xml:base="
 	if index := bytes.Index(bytes.ToLower(tag), []byte(baseAttribute)); index >= 0 {
