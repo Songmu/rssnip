@@ -173,11 +173,14 @@ func parseFeed(body []byte, sourceURL string) ([]Item, error) {
 		}
 		for _, enclosure := range source.Enclosures {
 			size, _ := strconv.ParseInt(enclosure.Length, 10, 64)
-			item.Attachments = append(item.Attachments, Attachment{
+			attachment := Attachment{
 				URL:         enclosure.URL,
 				MIMEType:    enclosure.Type,
 				SizeInBytes: size,
-			})
+			}
+			if validAttachment(attachment) {
+				item.Attachments = append(item.Attachments, attachment)
+			}
 		}
 		items = append(items, item)
 	}
@@ -227,7 +230,10 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 			Feed:          info,
 		}
 		for _, attachment := range source.Attachments {
-			item.Attachments = append(item.Attachments, Attachment(attachment))
+			normalized := Attachment(attachment)
+			if validAttachment(normalized) {
+				item.Attachments = append(item.Attachments, normalized)
+			}
 		}
 		items = append(items, item)
 	}
@@ -236,6 +242,10 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 
 func generatedID(item *gofeed.Item) string {
 	return hashID(item.Title, item.Published, item.Updated, item.Description)
+}
+
+func validAttachment(attachment Attachment) bool {
+	return attachment.URL != "" && attachment.MIMEType != ""
 }
 
 func generatedJSONFeedID(item jsonFeedItem) string {

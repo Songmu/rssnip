@@ -12,6 +12,7 @@ func TestParseFeedFormats(t *testing.T) {
 		body      string
 		wantTitle string
 		wantDate  string
+		wantFiles int
 	}{
 		{
 			name: "RSS 2.0",
@@ -26,6 +27,7 @@ func TestParseFeedFormats(t *testing.T) {
       <link>https://example.com/rss</link>
       <pubDate>Mon, 15 Jan 2024 12:00:00 GMT</pubDate>
       <description>RSS summary</description>
+      <enclosure url="" type="" length="10"/>
     </item>
   </channel>
 </rss>`,
@@ -81,11 +83,16 @@ func TestParseFeedFormats(t *testing.T) {
     "url": "https://example.com/json",
     "title": "JSON item",
     "content_text": "JSON content",
-    "date_published": "2024-01-18T12:00:00+00:00"
+    "date_published": "2024-01-18T12:00:00+00:00",
+    "attachments": [
+      {"url": "", "mime_type": ""},
+      {"url": "https://example.com/file.txt", "mime_type": "text/plain"}
+    ]
   }]
 }`,
 			wantTitle: "JSON item",
 			wantDate:  "2024-01-18T12:00:00Z",
+			wantFiles: 1,
 		},
 		{
 			name: "JSON Feed 1.0",
@@ -125,6 +132,9 @@ func TestParseFeedFormats(t *testing.T) {
 			}
 			if got := items[0].Feed.FeedURL; got != "https://example.com/feed" {
 				t.Errorf("feed URL = %q", got)
+			}
+			if got := len(items[0].Attachments); got != tt.wantFiles {
+				t.Errorf("attachments = %d, want %d", got, tt.wantFiles)
 			}
 		})
 	}
