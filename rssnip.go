@@ -96,12 +96,12 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) err
 			items = append(items, filtered...)
 			continue
 		}
-		if err := writeItemsWithCode(outStream, filtered, code, *rawOutput, false); err != nil {
+		if err := writeItemsWithCodeContext(ctx, outStream, filtered, code, *rawOutput, false); err != nil {
 			return err
 		}
 	}
 	if *jsonOutput {
-		return writeItemsWithCode(outStream, items, code, false, true)
+		return writeItemsWithCodeContext(ctx, outStream, items, code, false, true)
 	}
 	return nil
 }

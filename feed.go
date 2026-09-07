@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mmcdole/gofeed"
+	"github.com/mmcdole/gofeed/atom"
 )
 
 const userAgent = "rssnip/" + version
@@ -63,6 +64,8 @@ type jsonFeed struct {
 	Version     string         `json:"version"`
 	Title       string         `json:"title"`
 	HomePageURL string         `json:"home_page_url"`
+	Authors     []Author       `json:"authors"`
+	Author      *Author        `json:"author"`
 	Items       []jsonFeedItem `json:"items"`
 }
 
@@ -127,7 +130,11 @@ func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item
 	if len(body) > maxFeedSize {
 		return nil, fmt.Errorf("read %q: feed exceeds %d MiB limit", feedURL, maxFeedSize>>20)
 	}
-	return parseFeed(body, feedURL)
+	sourceURL := feedURL
+	if resp.Request != nil && resp.Request.URL != nil {
+		sourceURL = resp.Request.URL.String()
+	}
+	return parseFeed(body, sourceURL)
 }
 
 func parseFeed(body []byte, sourceURL string) ([]Item, error) {
@@ -143,41 +150,81 @@ func parseFeed(body []byte, sourceURL string) ([]Item, error) {
 		return items, nil
 	}
 
-	feed, err := gofeed.NewParser().Parse(bytes.NewReader(body))
+	parser := gofeed.NewParser()
+	parser.KeepOriginalFeed = true
+	feed, err := parser.Parse(bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("parse feed %q: %w", sourceURL, err)
 	}
 	info := FeedInfo{
 		Title:       feed.Title,
-		HomePageURL: feed.Link,
+		HomePageURL: resolveURL(sourceURL, feed.Link),
 		FeedURL:     sourceURL,
 	}
+	var atomFeed *atom.Feed
+	if parsed, ok := feed.OriginalFeed().(*atom.Feed); ok {
+		atomFeed = parsed
+	}
 	items := make([]Item, 0, len(feed.Items))
-	for _, source := range feed.Items {
+	for i, source := range feed.Items {
+		if source.GUID == "" && source.Link == "" {
+			continue
+		}
+		contentHTML, contentText := source.Content, ""
+		if atomFeed != nil && i < len(atomFeed.Entries) {
+			contentHTML, contentText = atomContent(atomFeed.Entries[i])
+		} else if contentHTML == "" {
+			contentHTML = source.Description
+		}
+		var authors []Author
+		if atomFeed != nil && i < len(atomFeed.Entries) && len(atomFeed.Entries[i].Authors) > 0 {
+			authors = atomAuthors(sourceURL, atomFeed.Entries[i].Authors)
+		} else {
+			for _, person := range source.Authors {
+				authors = append(authors, Author{Name: person.Name})
+			}
+		}
+		if len(authors) == 0 {
+			if atomFeed != nil {
+				authors = atomAuthors(sourceURL, atomFeed.Authors)
+			} else {
+				for _, person := range feed.Authors {
+					authors = append(authors, Author{Name: person.Name})
+				}
+			}
+		}
+		id := source.GUID
+		if id == "" {
+			id = resolveURL(sourceURL, source.Link)
+		}
 		item := Item{
-			ID:          firstNonEmpty(source.GUID, source.Link, generatedID(source)),
-			URL:         source.Link,
+			ID:          id,
+			URL:         resolveURL(sourceURL, source.Link),
 			Title:       source.Title,
-			ContentHTML: source.Content,
+			ContentHTML: contentHTML,
+			ContentText: contentText,
 			Summary:     source.Description,
-			Image:       imageURL(source.Image),
+			Image:       resolveURL(sourceURL, imageURL(source.Image)),
 			Tags:        append([]string(nil), source.Categories...),
 			Feed:        info,
 		}
+		if item.ContentHTML == "" && item.ContentText == "" {
+			if atomFeed != nil {
+				item.ContentText = source.Description
+			} else {
+				item.ContentHTML = source.Description
+			}
+		}
 		item.DatePublished = formatTime(source.PublishedParsed)
 		item.DateModified = formatTime(source.UpdatedParsed)
-		for _, person := range source.Authors {
-			item.Authors = append(item.Authors, Author{
-				Name: person.Name,
-			})
-		}
+		item.Authors = authors
 		for _, enclosure := range source.Enclosures {
 			var size int64
 			if parsed, err := strconv.ParseInt(enclosure.Length, 10, 64); err == nil && parsed > 0 {
 				size = parsed
 			}
 			attachment := Attachment{
-				URL:         enclosure.URL,
+				URL:         resolveURL(sourceURL, enclosure.URL),
 				MIMEType:    enclosure.Type,
 				SizeInBytes: size,
 			}
@@ -210,11 +257,18 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 		HomePageURL: feed.HomePageURL,
 		FeedURL:     sourceURL,
 	}
+	feedAuthors := append([]Author(nil), feed.Authors...)
+	if len(feedAuthors) == 0 && feed.Author != nil {
+		feedAuthors = append(feedAuthors, *feed.Author)
+	}
 	items := make([]Item, 0, len(feed.Items))
 	for _, source := range feed.Items {
 		authors := append([]Author(nil), source.Authors...)
 		if len(authors) == 0 && source.Author != nil {
 			authors = append(authors, *source.Author)
+		}
+		if len(authors) == 0 {
+			authors = append(authors, feedAuthors...)
 		}
 		item := Item{
 			ID:            firstNonEmpty(source.ID, source.URL, generatedJSONFeedID(source)),
@@ -242,10 +296,6 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 	return items, true, nil
 }
 
-func generatedID(item *gofeed.Item) string {
-	return hashID(item.Title, item.Published, item.Updated, item.Description)
-}
-
 func normalizeAttachment(attachment Attachment) (Attachment, bool) {
 	if attachment.URL == "" || attachment.MIMEType == "" {
 		return Attachment{}, false
@@ -257,6 +307,47 @@ func normalizeAttachment(attachment Attachment) (Attachment, bool) {
 		attachment.DurationInSeconds = 0
 	}
 	return attachment, true
+}
+
+func atomContent(entry *atom.Entry) (html, text string) {
+	if entry == nil {
+		return "", ""
+	}
+	if entry.Content == nil {
+		return "", entry.Summary
+	}
+	switch strings.ToLower(entry.Content.Type) {
+	case "html", "xhtml":
+		return entry.Content.Value, ""
+	default:
+		return "", entry.Content.Value
+	}
+}
+
+func atomAuthors(base string, people []*atom.Person) []Author {
+	authors := make([]Author, 0, len(people))
+	for _, person := range people {
+		if person == nil {
+			continue
+		}
+		authors = append(authors, Author{Name: person.Name, URL: resolveURL(base, person.URI)})
+	}
+	return authors
+}
+
+func resolveURL(base, value string) string {
+	if value == "" {
+		return ""
+	}
+	baseURL, err := url.Parse(base)
+	if err != nil {
+		return value
+	}
+	relativeURL, err := url.Parse(value)
+	if err != nil {
+		return value
+	}
+	return baseURL.ResolveReference(relativeURL).String()
 }
 
 func generatedJSONFeedID(item jsonFeedItem) string {

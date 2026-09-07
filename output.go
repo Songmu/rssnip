@@ -2,6 +2,7 @@ package rssnip
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,7 +15,7 @@ func writeItems(out io.Writer, items []Item, expression string, raw, asJSON bool
 	if err != nil {
 		return err
 	}
-	return writeItemsWithCode(out, items, code, raw, asJSON)
+	return writeItemsWithCodeContext(context.Background(), out, items, code, raw, asJSON)
 }
 
 func compileQuery(expression string) (*gojq.Code, error) {
@@ -33,6 +34,10 @@ func compileQuery(expression string) (*gojq.Code, error) {
 }
 
 func writeItemsWithCode(out io.Writer, items []Item, code *gojq.Code, raw, asJSON bool) error {
+	return writeItemsWithCodeContext(context.Background(), out, items, code, raw, asJSON)
+}
+
+func writeItemsWithCodeContext(ctx context.Context, out io.Writer, items []Item, code *gojq.Code, raw, asJSON bool) error {
 	var results []any
 	if asJSON {
 		results = make([]any, 0, len(items))
@@ -40,11 +45,18 @@ func writeItemsWithCode(out io.Writer, items []Item, code *gojq.Code, raw, asJSO
 	encoder := json.NewEncoder(out)
 	encoder.SetEscapeHTML(false)
 	for _, item := range items {
-		values, err := applyQuery(code, item)
+		iter, err := applyQuery(ctx, code, item)
 		if err != nil {
 			return err
 		}
-		for _, value := range values {
+		for {
+			value, ok := iter.Next()
+			if !ok {
+				break
+			}
+			if err, ok := value.(error); ok {
+				return fmt.Errorf("run --jq expression: %w", err)
+			}
 			if asJSON {
 				results = append(results, value)
 				continue
@@ -70,9 +82,9 @@ func writeItemsWithCode(out io.Writer, items []Item, code *gojq.Code, raw, asJSO
 	return nil
 }
 
-func applyQuery(code *gojq.Code, item Item) ([]any, error) {
+func applyQuery(ctx context.Context, code *gojq.Code, item Item) (gojq.Iter, error) {
 	if code == nil {
-		return []any{item}, nil
+		return gojq.NewIter[any](item), nil
 	}
 	data, err := json.Marshal(item)
 	if err != nil {
@@ -84,18 +96,5 @@ func applyQuery(code *gojq.Code, item Item) ([]any, error) {
 	if err := decoder.Decode(&input); err != nil {
 		return nil, fmt.Errorf("prepare jq input: %w", err)
 	}
-
-	results := make([]any, 0, 1)
-	iter := code.Run(input)
-	for {
-		value, ok := iter.Next()
-		if !ok {
-			break
-		}
-		if err, ok := value.(error); ok {
-			return nil, fmt.Errorf("run --jq expression: %w", err)
-		}
-		results = append(results, value)
-	}
-	return results, nil
+	return code.RunWithContext(ctx, input), nil
 }

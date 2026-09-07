@@ -245,3 +245,56 @@ func TestFractionalSecondDates(t *testing.T) {
 		t.Error("fractional-second item should be included")
 	}
 }
+
+func TestAtomContentAuthorsAndRelativeURLs(t *testing.T) {
+	t.Parallel()
+	body := []byte(`<feed xmlns="http://www.w3.org/2005/Atom">
+	  <title>Feed</title>
+	  <link href="/"/>
+	  <author><name>Feed Author</name><uri>/authors/feed</uri></author>
+	  <entry>
+	    <id>entry-1</id>
+	    <title>Entry</title>
+	    <link href="posts/1"/>
+	    <content type="text">&lt;em&gt;text&lt;/em&gt;</content>
+	  </entry>
+	</feed>`)
+	items, err := parseFeed(body, "https://example.com/feeds/main.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := items[0].ContentText; got != "<em>text</em>" {
+		t.Errorf("content_text = %q", got)
+	}
+	if got := items[0].ContentHTML; got != "" {
+		t.Errorf("content_html = %q", got)
+	}
+	if got := items[0].URL; got != "https://example.com/feeds/posts/1" {
+		t.Errorf("url = %q", got)
+	}
+	if got := items[0].Feed.HomePageURL; got != "https://example.com/" {
+		t.Errorf("home page URL = %q", got)
+	}
+	if len(items[0].Authors) != 1 || items[0].Authors[0].Name != "Feed Author" ||
+		items[0].Authors[0].URL != "https://example.com/authors/feed" {
+		t.Errorf("authors = %#v", items[0].Authors)
+	}
+}
+
+func TestRSSItemsWithoutStableIdentityAreRejected(t *testing.T) {
+	t.Parallel()
+	body := []byte(`<rss version="2.0"><channel><title>Feed</title>
+	  <item><title>No identity</title><description>content</description></item>
+	  <item><link>/stable</link><title>Stable</title><description>content</description></item>
+	</channel></rss>`)
+	items, err := parseFeed(body, "https://example.com/feed.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != "https://example.com/stable" {
+		t.Fatalf("items = %#v", items)
+	}
+	if items[0].ContentHTML != "content" {
+		t.Errorf("content_html = %q", items[0].ContentHTML)
+	}
+}
