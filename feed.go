@@ -106,7 +106,7 @@ func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item
 		return nil, fmt.Errorf("create request for %q: %w", feedURL, err)
 	}
 	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("Accept", "application/feed+json, application/atom+xml, application/rss+xml, application/rdf+xml, application/xml, text/xml")
+	req.Header.Set("Accept", "application/feed+json, application/json, application/atom+xml, application/rss+xml, application/rdf+xml, application/xml, text/xml, */*;q=0.1")
 
 	resp, err := client.Do(req)
 	if err != nil {

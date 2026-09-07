@@ -204,6 +204,10 @@ func newFeedServer(t *testing.T, body string) *httptest.Server {
 		if got := r.Header.Get("User-Agent"); !strings.HasPrefix(got, "rssnip/") {
 			t.Errorf("User-Agent = %q", got)
 		}
+		accept := r.Header.Get("Accept")
+		if !strings.Contains(accept, "application/json") || !strings.Contains(accept, "*/*") {
+			t.Errorf("Accept = %q", accept)
+		}
 		w.Header().Set("Content-Type", "application/rss+xml")
 		fmt.Fprint(w, body)
 	}))
