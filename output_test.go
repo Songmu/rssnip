@@ -2,6 +2,7 @@ package rssnip
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"math"
 	"strings"
@@ -58,6 +59,20 @@ func TestWriteItemsWrapsRawOutputErrors(t *testing.T) {
 	err := writeItems(failingWriter{}, []Item{item}, ".title", true, false)
 	if err == nil || !strings.Contains(err.Error(), "write output: write failed") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestWriteItemValuesChecksContextWithoutJQ(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := writeItemValues(ctx, []Item{{ID: "item"}}, nil, func(any) error {
+		t.Fatal("writeValue called")
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want %v", err, context.Canceled)
 	}
 }
 

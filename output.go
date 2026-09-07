@@ -85,6 +85,9 @@ func writeItemsWithCodeContext(ctx context.Context, out io.Writer, items []Item,
 
 func writeItemValues(ctx context.Context, items []Item, code *gojq.Code, writeValue func(any) error) error {
 	for _, item := range items {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		iter, err := applyQuery(ctx, code, item)
 		if err != nil {
 			return err
