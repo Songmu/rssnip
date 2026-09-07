@@ -172,14 +172,17 @@ func parseFeed(body []byte, sourceURL string) ([]Item, error) {
 			})
 		}
 		for _, enclosure := range source.Enclosures {
-			size, _ := strconv.ParseInt(enclosure.Length, 10, 64)
+			var size int64
+			if parsed, err := strconv.ParseInt(enclosure.Length, 10, 64); err == nil && parsed > 0 {
+				size = parsed
+			}
 			attachment := Attachment{
 				URL:         enclosure.URL,
 				MIMEType:    enclosure.Type,
 				SizeInBytes: size,
 			}
-			if validAttachment(attachment) {
-				item.Attachments = append(item.Attachments, attachment)
+			if normalized, ok := normalizeAttachment(attachment); ok {
+				item.Attachments = append(item.Attachments, normalized)
 			}
 		}
 		items = append(items, item)
@@ -230,8 +233,7 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 			Feed:          info,
 		}
 		for _, attachment := range source.Attachments {
-			normalized := Attachment(attachment)
-			if validAttachment(normalized) {
+			if normalized, ok := normalizeAttachment(Attachment(attachment)); ok {
 				item.Attachments = append(item.Attachments, normalized)
 			}
 		}
@@ -244,8 +246,17 @@ func generatedID(item *gofeed.Item) string {
 	return hashID(item.Title, item.Published, item.Updated, item.Description)
 }
 
-func validAttachment(attachment Attachment) bool {
-	return attachment.URL != "" && attachment.MIMEType != ""
+func normalizeAttachment(attachment Attachment) (Attachment, bool) {
+	if attachment.URL == "" || attachment.MIMEType == "" {
+		return Attachment{}, false
+	}
+	if attachment.SizeInBytes < 0 {
+		attachment.SizeInBytes = 0
+	}
+	if attachment.DurationInSeconds < 0 {
+		attachment.DurationInSeconds = 0
+	}
+	return attachment, true
 }
 
 func generatedJSONFeedID(item jsonFeedItem) string {

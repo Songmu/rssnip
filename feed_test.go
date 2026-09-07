@@ -28,11 +28,13 @@ func TestParseFeedFormats(t *testing.T) {
       <pubDate>Mon, 15 Jan 2024 12:00:00 GMT</pubDate>
       <description>RSS summary</description>
       <enclosure url="" type="" length="10"/>
+      <enclosure url="https://example.com/file.txt" type="text/plain" length="999999999999999999999999"/>
     </item>
   </channel>
 </rss>`,
 			wantTitle: "RSS item",
 			wantDate:  "2024-01-15T12:00:00Z",
+			wantFiles: 1,
 		},
 		{
 			name: "Atom 1.0",
@@ -86,7 +88,12 @@ func TestParseFeedFormats(t *testing.T) {
     "date_published": "2024-01-18T12:00:00+00:00",
     "attachments": [
       {"url": "", "mime_type": ""},
-      {"url": "https://example.com/file.txt", "mime_type": "text/plain"}
+      {
+        "url": "https://example.com/file.txt",
+        "mime_type": "text/plain",
+        "size_in_bytes": -1,
+        "duration_in_seconds": -1
+      }
     ]
   }]
 }`,
@@ -135,6 +142,11 @@ func TestParseFeedFormats(t *testing.T) {
 			}
 			if got := len(items[0].Attachments); got != tt.wantFiles {
 				t.Errorf("attachments = %d, want %d", got, tt.wantFiles)
+			}
+			for _, attachment := range items[0].Attachments {
+				if attachment.SizeInBytes < 0 || attachment.DurationInSeconds < 0 {
+					t.Errorf("negative attachment values: %#v", attachment)
+				}
 			}
 		})
 	}
