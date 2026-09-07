@@ -52,7 +52,7 @@ func writeItemsWithCode(out io.Writer, items []Item, code *gojq.Code, raw, asJSO
 			if raw {
 				if text, ok := value.(string); ok {
 					if _, err := fmt.Fprintln(out, text); err != nil {
-						return err
+						return fmt.Errorf("write output: %w", err)
 					}
 					continue
 				}

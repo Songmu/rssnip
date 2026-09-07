@@ -87,6 +87,22 @@ func TestParseFeedFormats(t *testing.T) {
 			wantTitle: "JSON item",
 			wantDate:  "2024-01-18T12:00:00Z",
 		},
+		{
+			name: "JSON Feed 1.0",
+			body: `{
+  "version": "https://jsonfeed.org/version/1",
+  "title": "JSON Feed 1.0",
+  "items": [{
+    "id": "json-1.0",
+    "url": "https://example.com/json-1.0",
+    "title": "JSON 1.0 item",
+    "content_text": "JSON content",
+    "date_published": "2024-01-19T12:00:00Z"
+  }]
+}`,
+			wantTitle: "JSON 1.0 item",
+			wantDate:  "2024-01-19T12:00:00Z",
+		},
 	}
 
 	for _, tt := range tests {
@@ -118,6 +134,15 @@ func TestParseFeedRejectsInvalidInput(t *testing.T) {
 	t.Parallel()
 	_, err := parseFeed([]byte("not a feed"), "https://example.com/feed")
 	if err == nil || !strings.Contains(err.Error(), "parse feed") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestParseFeedRejectsUnsupportedJSON(t *testing.T) {
+	t.Parallel()
+	body := []byte(`{"version":"https://jsonfeed.org/version/2","items":[]}`)
+	_, err := parseFeed(body, "https://example.com/feed")
+	if err == nil || !strings.Contains(err.Error(), "not a supported JSON Feed") {
 		t.Fatalf("error = %v", err)
 	}
 }

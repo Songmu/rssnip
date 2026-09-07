@@ -137,9 +137,10 @@ func parseFeed(body []byte, sourceURL string) ([]Item, error) {
 		if err != nil {
 			return nil, err
 		}
-		if recognized {
-			return items, nil
+		if !recognized {
+			return nil, fmt.Errorf("parse feed %q: JSON document is not a supported JSON Feed", sourceURL)
 		}
+		return items, nil
 	}
 
 	feed, err := gofeed.NewParser().Parse(bytes.NewReader(body))
@@ -193,7 +194,9 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 	if err := json.Unmarshal(body, &feed); err != nil {
 		return nil, false, fmt.Errorf("parse feed %q: %w", sourceURL, err)
 	}
-	if !strings.HasPrefix(feed.Version, "https://jsonfeed.org/version/") {
+	switch feed.Version {
+	case "https://jsonfeed.org/version/1", "https://jsonfeed.org/version/1.1":
+	default:
 		return nil, false, nil
 	}
 	info := FeedInfo{
