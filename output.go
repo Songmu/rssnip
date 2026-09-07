@@ -1,6 +1,7 @@
 package rssnip
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -64,7 +65,9 @@ func applyQuery(code *gojq.Code, item Item) ([]any, error) {
 		return nil, fmt.Errorf("encode item: %w", err)
 	}
 	var input any
-	if err := json.Unmarshal(data, &input); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&input); err != nil {
 		return nil, fmt.Errorf("prepare jq input: %w", err)
 	}
 

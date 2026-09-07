@@ -63,7 +63,6 @@ type jsonFeed struct {
 	Version     string         `json:"version"`
 	Title       string         `json:"title"`
 	HomePageURL string         `json:"home_page_url"`
-	FeedURL     string         `json:"feed_url"`
 	Items       []jsonFeedItem `json:"items"`
 }
 
@@ -194,7 +193,7 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 	info := FeedInfo{
 		Title:       feed.Title,
 		HomePageURL: feed.HomePageURL,
-		FeedURL:     firstNonEmpty(feed.FeedURL, sourceURL),
+		FeedURL:     sourceURL,
 	}
 	items := make([]Item, 0, len(feed.Items))
 	for _, source := range feed.Items {
@@ -294,12 +293,20 @@ func withinPeriod(item Item, since, until *time.Time) bool {
 	if since == nil && until == nil {
 		return true
 	}
-	dateValue := firstNonEmpty(item.DatePublished, item.DateModified)
-	if dateValue == "" {
-		return false
+	var itemTime time.Time
+	found := false
+	for _, dateValue := range []string{item.DatePublished, item.DateModified} {
+		if dateValue == "" {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339Nano, dateValue)
+		if err == nil {
+			itemTime = parsed
+			found = true
+			break
+		}
 	}
-	itemTime, err := time.Parse(time.RFC3339Nano, dateValue)
-	if err != nil {
+	if !found {
 		return false
 	}
 	if since != nil && itemTime.Before(*since) {

@@ -75,6 +75,7 @@ func TestParseFeedFormats(t *testing.T) {
   "version": "https://jsonfeed.org/version/1.1",
   "title": "JSON Feed",
   "home_page_url": "https://example.com/",
+  "feed_url": "https://canonical.example.com/feed",
   "items": [{
     "id": "json-1",
     "url": "https://example.com/json",
@@ -146,6 +147,21 @@ func TestWithinPeriod(t *testing.T) {
 		if got := withinPeriod(item, since, until); got != tt.want {
 			t.Errorf("withinPeriod(%q) = %v, want %v", tt.date, got, tt.want)
 		}
+	}
+}
+
+func TestWithinPeriodFallsBackToModifiedDate(t *testing.T) {
+	t.Parallel()
+	since, err := parseTimeBound("2024-01-01", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := Item{
+		DatePublished: "not-rfc3339",
+		DateModified:  "2024-01-15T12:00:00Z",
+	}
+	if !withinPeriod(item, since, nil) {
+		t.Error("parseable modification date should be used when publication date is invalid")
 	}
 }
 
