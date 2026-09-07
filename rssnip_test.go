@@ -127,7 +127,7 @@ func TestRunErrors(t *testing.T) {
 		{"raw JSON", []string{"-r", "--json", "--jq", ".", "https://example.com/feed"}, "-r and --json"},
 		{"invalid since", []string{"--since", "yesterday", "https://example.com/feed"}, "invalid --since"},
 		{"reversed period", []string{"--since", "2024-02-01", "--until", "2024-01-01", "https://example.com/feed"}, "--since must not be after --until"},
-		{"invalid jq", []string{"--jq", ".", "://bad"}, "invalid feed URL"},
+		{"invalid URL", []string{"--jq", ".", "://bad"}, "invalid feed URL"},
 	}
 	for _, tt := range tests {
 		tt := tt

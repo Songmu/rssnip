@@ -56,6 +56,9 @@ func writeItems(out io.Writer, items []Item, expression string, raw, asJSON bool
 }
 
 func applyQuery(code *gojq.Code, item Item) ([]any, error) {
+	if code == nil {
+		return []any{item}, nil
+	}
 	data, err := json.Marshal(item)
 	if err != nil {
 		return nil, fmt.Errorf("encode item: %w", err)
@@ -63,9 +66,6 @@ func applyQuery(code *gojq.Code, item Item) ([]any, error) {
 	var input any
 	if err := json.Unmarshal(data, &input); err != nil {
 		return nil, fmt.Errorf("prepare jq input: %w", err)
-	}
-	if code == nil {
-		return []any{input}, nil
 	}
 
 	results := make([]any, 0, 1)
