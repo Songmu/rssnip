@@ -38,12 +38,52 @@ func writeItemsWithCode(out io.Writer, items []Item, code *gojq.Code, raw, asJSO
 }
 
 func writeItemsWithCodeContext(ctx context.Context, out io.Writer, items []Item, code *gojq.Code, raw, asJSON bool) error {
-	var results []any
-	if asJSON {
-		results = make([]any, 0, len(items))
-	}
 	encoder := json.NewEncoder(out)
 	encoder.SetEscapeHTML(false)
+	first := true
+	if asJSON {
+		if _, err := fmt.Fprint(out, "["); err != nil {
+			return fmt.Errorf("write output: %w", err)
+		}
+	}
+	err := writeItemValues(ctx, items, code, func(value any) error {
+		if asJSON {
+			if !first {
+				if _, err := fmt.Fprint(out, ","); err != nil {
+					return fmt.Errorf("write output: %w", err)
+				}
+			}
+			first = false
+			if err := encoder.Encode(value); err != nil {
+				return fmt.Errorf("write output: %w", err)
+			}
+			return nil
+		}
+		if raw {
+			if text, ok := value.(string); ok {
+				if _, err := fmt.Fprintln(out, text); err != nil {
+					return fmt.Errorf("write output: %w", err)
+				}
+				return nil
+			}
+		}
+		if err := encoder.Encode(value); err != nil {
+			return fmt.Errorf("write output: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		if _, err := fmt.Fprint(out, "]\n"); err != nil {
+			return fmt.Errorf("write output: %w", err)
+		}
+	}
+	return nil
+}
+
+func writeItemValues(ctx context.Context, items []Item, code *gojq.Code, writeValue func(any) error) error {
 	for _, item := range items {
 		iter, err := applyQuery(ctx, code, item)
 		if err != nil {
@@ -57,26 +97,9 @@ func writeItemsWithCodeContext(ctx context.Context, out io.Writer, items []Item,
 			if err, ok := value.(error); ok {
 				return fmt.Errorf("run --jq expression: %w", err)
 			}
-			if asJSON {
-				results = append(results, value)
-				continue
+			if err := writeValue(value); err != nil {
+				return err
 			}
-			if raw {
-				if text, ok := value.(string); ok {
-					if _, err := fmt.Fprintln(out, text); err != nil {
-						return fmt.Errorf("write output: %w", err)
-					}
-					continue
-				}
-			}
-			if err := encoder.Encode(value); err != nil {
-				return fmt.Errorf("write output: %w", err)
-			}
-		}
-	}
-	if asJSON {
-		if err := encoder.Encode(results); err != nil {
-			return fmt.Errorf("write output: %w", err)
 		}
 	}
 	return nil

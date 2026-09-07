@@ -2,6 +2,7 @@ package rssnip
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -77,7 +78,15 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) err
 	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
-	var items []Item
+	var encoder *json.Encoder
+	firstJSONValue := true
+	if *jsonOutput {
+		if _, err := fmt.Fprint(outStream, "["); err != nil {
+			return fmt.Errorf("write output: %w", err)
+		}
+		encoder = json.NewEncoder(outStream)
+		encoder.SetEscapeHTML(false)
+	}
 	for _, feedURL := range urls {
 		feedItems, err := fetchFeed(ctx, client, feedURL)
 		if err != nil {
@@ -93,7 +102,20 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) err
 			}
 		}
 		if *jsonOutput {
-			items = append(items, filtered...)
+			if err := writeItemValues(ctx, filtered, code, func(value any) error {
+				if !firstJSONValue {
+					if _, err := fmt.Fprint(outStream, ","); err != nil {
+						return fmt.Errorf("write output: %w", err)
+					}
+				}
+				firstJSONValue = false
+				if err := encoder.Encode(value); err != nil {
+					return fmt.Errorf("write output: %w", err)
+				}
+				return nil
+			}); err != nil {
+				return err
+			}
 			continue
 		}
 		if err := writeItemsWithCodeContext(ctx, outStream, filtered, code, *rawOutput, false); err != nil {
@@ -101,7 +123,9 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) err
 		}
 	}
 	if *jsonOutput {
-		return writeItemsWithCodeContext(ctx, outStream, items, code, false, true)
+		if _, err := fmt.Fprint(outStream, "]\n"); err != nil {
+			return fmt.Errorf("write output: %w", err)
+		}
 	}
 	return nil
 }

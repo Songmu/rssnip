@@ -281,6 +281,40 @@ func TestAtomContentAuthorsAndRelativeURLs(t *testing.T) {
 	}
 }
 
+func TestAtomNestedXMLBaseAndHTMLMediaTypes(t *testing.T) {
+	t.Parallel()
+	body := []byte(`<feed xmlns="http://www.w3.org/2005/Atom" xml:base="/root/">
+	  <title>Feed</title>
+	  <entry xml:base="entries/">
+	    <id>entry-1</id>
+	    <title>Entry</title>
+	    <link href="one"/>
+	    <content type="text/html; charset=UTF-8">&lt;em&gt;HTML&lt;/em&gt;</content>
+	  </entry>
+	  <entry xml:base="entries/">
+	    <id>entry-2</id>
+	    <title>Entry</title>
+	    <link href="two"/>
+	    <content type="application/xhtml+xml">&lt;div&gt;XHTML&lt;/div&gt;</content>
+	  </entry>
+	</feed>`)
+	items, err := parseFeed(body, "https://example.com/feeds/main.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, wantURL := range []string{
+		"https://example.com/root/entries/one",
+		"https://example.com/root/entries/two",
+	} {
+		if got := items[i].URL; got != wantURL {
+			t.Errorf("items[%d].URL = %q, want %q", i, got, wantURL)
+		}
+		if items[i].ContentHTML == "" || items[i].ContentText != "" {
+			t.Errorf("items[%d] content = %#v", i, items[i])
+		}
+	}
+}
+
 func TestRSSItemsWithoutStableIdentityAreRejected(t *testing.T) {
 	t.Parallel()
 	body := []byte(`<rss version="2.0"><channel><title>Feed</title>

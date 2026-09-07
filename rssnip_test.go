@@ -147,6 +147,7 @@ func TestRunErrors(t *testing.T) {
 		{"invalid URL", []string{"--jq", ".", "://bad"}, "invalid feed URL"},
 		{"relative URL", []string{"feed.xml"}, "invalid feed URL"},
 		{"non-HTTP URL", []string{"ftp://example.com/feed"}, "invalid feed URL"},
+		{"credential URL", []string{"http://user:" + "password@example.com/feed"}, "userinfo is not allowed"},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -156,6 +157,9 @@ func TestRunErrors(t *testing.T) {
 			err := Run(context.Background(), tt.args, &stdout, &stderr)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("error = %v, want substring %q", err, tt.want)
+			}
+			if strings.Contains(err.Error(), "password") {
+				t.Fatalf("error exposes credentials: %v", err)
 			}
 		})
 	}

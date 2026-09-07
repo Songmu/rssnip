@@ -6,8 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -102,38 +104,42 @@ func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item
 		if err == nil {
 			err = fmt.Errorf("must be an absolute HTTP or HTTPS URL")
 		}
-		return nil, fmt.Errorf("invalid feed URL %q: %w", feedURL, err)
+		return nil, fmt.Errorf("invalid feed URL %q: %w", displayURL(feedURL), err)
+	}
+	if parsedURL.User != nil {
+		return nil, fmt.Errorf("invalid feed URL %q: userinfo is not allowed", displayURL(feedURL))
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create request for %q: %w", feedURL, err)
+		return nil, fmt.Errorf("create request for %q failed", displayURL(feedURL))
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "application/feed+json, application/json, application/atom+xml, application/rss+xml, application/rdf+xml, application/xml, text/xml, */*;q=0.1")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetch %q: %w", feedURL, err)
+		return nil, fmt.Errorf("fetch %q failed", displayURL(feedURL))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-		return nil, fmt.Errorf("fetch %q: unexpected HTTP status %s", feedURL, resp.Status)
+		return nil, fmt.Errorf("fetch %q: unexpected HTTP status %s", displayURL(feedURL), resp.Status)
 	}
 	if resp.ContentLength > maxFeedSize {
-		return nil, fmt.Errorf("read %q: feed exceeds %d MiB limit", feedURL, maxFeedSize>>20)
+		return nil, fmt.Errorf("read %q: feed exceeds %d MiB limit", displayURL(feedURL), maxFeedSize>>20)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxFeedSize+1))
 	if err != nil {
-		return nil, fmt.Errorf("read %q: %w", feedURL, err)
+		return nil, fmt.Errorf("read %q: %w", displayURL(feedURL), err)
 	}
 	if len(body) > maxFeedSize {
-		return nil, fmt.Errorf("read %q: feed exceeds %d MiB limit", feedURL, maxFeedSize>>20)
+		return nil, fmt.Errorf("read %q: feed exceeds %d MiB limit", displayURL(feedURL), maxFeedSize>>20)
 	}
 	sourceURL := feedURL
 	if resp.Request != nil && resp.Request.URL != nil {
 		sourceURL = resp.Request.URL.String()
 	}
+	sourceURL = displayURL(sourceURL)
 	return parseFeed(body, sourceURL)
 }
 
@@ -152,7 +158,7 @@ func parseFeed(body []byte, sourceURL string) ([]Item, error) {
 
 	parser := gofeed.NewParser()
 	parser.KeepOriginalFeed = true
-	feed, err := parser.Parse(bytes.NewReader(body))
+	feed, err := parser.Parse(bytes.NewReader(withDocumentBase(body, documentBaseURL(sourceURL))))
 	if err != nil {
 		return nil, fmt.Errorf("parse feed %q: %w", sourceURL, err)
 	}
@@ -316,8 +322,12 @@ func atomContent(entry *atom.Entry) (html, text string) {
 	if entry.Content == nil {
 		return "", entry.Summary
 	}
-	switch strings.ToLower(entry.Content.Type) {
-	case "html", "xhtml":
+	contentType, _, err := mime.ParseMediaType(entry.Content.Type)
+	if err != nil {
+		contentType = entry.Content.Type
+	}
+	switch strings.ToLower(contentType) {
+	case "html", "xhtml", "text/html", "application/xhtml+xml":
 		return entry.Content.Value, ""
 	default:
 		return "", entry.Content.Value
@@ -335,6 +345,53 @@ func atomAuthors(base string, people []*atom.Person) []Author {
 	return authors
 }
 
+func withDocumentBase(body []byte, sourceURL string) []byte {
+	start := bytes.Index(bytes.ToLower(body), []byte("<feed"))
+	if start < 0 {
+		return body
+	}
+	end := bytes.IndexByte(body[start:], '>')
+	if end < 0 {
+		return body
+	}
+	end += start
+	tag := body[start:end]
+	const baseAttribute = "xml:base="
+	if index := bytes.Index(bytes.ToLower(tag), []byte(baseAttribute)); index >= 0 {
+		valueStart := index + len(baseAttribute)
+		for valueStart < len(tag) && (tag[valueStart] == ' ' || tag[valueStart] == '\t') {
+			valueStart++
+		}
+		if valueStart >= len(tag) || (tag[valueStart] != '"' && tag[valueStart] != '\'') {
+			return body
+		}
+		quote := tag[valueStart]
+		valueEnd := bytes.IndexByte(tag[valueStart+1:], quote)
+		if valueEnd < 0 {
+			return body
+		}
+		valueEnd += valueStart + 1
+		resolved := xmlEscape(resolveURL(sourceURL, string(tag[valueStart+1:valueEnd])))
+		return bytes.Join([][]byte{body[:start+valueStart+1], []byte(resolved), body[start+valueEnd:]}, nil)
+	}
+	base := []byte(` xml:base="` + xmlEscape(sourceURL) + `"`)
+	return bytes.Join([][]byte{body[:end], base, body[end:]}, nil)
+}
+
+func documentBaseURL(value string) string {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return value
+	}
+	return parsed.ResolveReference(&url.URL{Path: "."}).String()
+}
+
+func xmlEscape(value string) string {
+	var escaped bytes.Buffer
+	_ = xml.EscapeText(&escaped, []byte(value))
+	return escaped.String()
+}
+
 func resolveURL(base, value string) string {
 	if value == "" {
 		return ""
@@ -348,6 +405,15 @@ func resolveURL(base, value string) string {
 		return value
 	}
 	return baseURL.ResolveReference(relativeURL).String()
+}
+
+func displayURL(value string) string {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return "<invalid URL>"
+	}
+	parsed.User = nil
+	return parsed.String()
 }
 
 func generatedJSONFeedID(item jsonFeedItem) string {
