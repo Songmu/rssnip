@@ -1,0 +1,7 @@
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Feed</title>
+  <entry>
+    <id>entry</id>
+    <content type="html">&lt;a href="posts/one"&gt;article&lt;/a&gt;&lt;img src="images/one.png"/&gt;</content>
+  </entry>
+</feed>

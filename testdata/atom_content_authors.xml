@@ -1,0 +1,11 @@
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Feed</title>
+  <link href="/"/>
+  <author><name>Feed Author</name><uri>/authors/feed</uri></author>
+  <entry>
+    <id>entry-1</id>
+    <title>Entry</title>
+    <link href="posts/1"/>
+    <content type="text">&lt;em&gt;text&lt;/em&gt;</content>
+  </entry>
+</feed>

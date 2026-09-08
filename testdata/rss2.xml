@@ -1,0 +1,16 @@
+﻿<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>RSS Feed</title>
+    <link>https://example.com/</link>
+    <item>
+      <guid>rss-1</guid>
+      <title>RSS item</title>
+      <link>https://example.com/rss</link>
+      <pubDate>Mon, 15 Jan 2024 12:00:00 GMT</pubDate>
+      <description>RSS summary</description>
+      <enclosure url="" type="" length="10"/>
+      <enclosure url="https://example.com/file.txt" type="text/plain" length="999999999999999999999999"/>
+    </item>
+  </channel>
+</rss>

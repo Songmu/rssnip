@@ -1,0 +1,15 @@
+<feed xmlns="http://www.w3.org/2005/Atom" xml:base="/root/">
+  <title>Feed</title>
+  <entry xml:base="entries/">
+    <id>entry-1</id>
+    <title>Entry</title>
+    <link href="one"/>
+    <content type="text/html; charset=UTF-8">&lt;em&gt;HTML&lt;/em&gt;</content>
+  </entry>
+  <entry xml:base="entries/">
+    <id>entry-2</id>
+    <title>Entry</title>
+    <link href="two"/>
+    <content type="application/xhtml+xml">&lt;div&gt;XHTML&lt;/div&gt;</content>
+  </entry>
+</feed>
