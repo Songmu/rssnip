@@ -24,6 +24,9 @@ for pipelines, crawlers, and further processing with tools such as `jq`.
 
 % rssnip --url https://example.com/feed.xml --jq '.url' -r
 https://example.com/article
+
+% printf '%s\n' https://example.com/feed.xml | rssnip
+{"id":"...","url":"https://example.com/article",...}
 ```
 
 ## Description
@@ -45,9 +48,9 @@ item fields before normalization. Unknown fields (including custom extensions)
 are ignored; changing a supported field changes the generated identifier.
 
 Every item is emitted as one compact JSON object per line. Feed URLs may be
-supplied by repeating `--url`, as positional arguments, or by combining both
-forms; local feed files may also be supplied as paths or `file://` URLs. Output
-preserves feed and item order.
+supplied by repeating `--url`, as positional arguments, one per line on
+standard input, or by combining any of these forms; local feed files may also
+be supplied as paths or `file://` URLs. Output preserves feed and item order.
 
 ### Output schema
 
