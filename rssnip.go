@@ -110,7 +110,7 @@ func readStdinURLs(in io.Reader) ([]string, error) {
 	if file, ok := in.(*os.File); ok {
 		info, err := file.Stat()
 		if err != nil {
-			return nil, nil
+			return nil, err
 		}
 		if info.Mode()&os.ModeCharDevice != 0 {
 			return nil, nil
