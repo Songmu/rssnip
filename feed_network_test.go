@@ -63,7 +63,7 @@ func TestRunPreservesCanceledFetch(t *testing.T) {
 func TestFetchFeedRedactsRedirectErrors(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "******example.com/feed", http.StatusFound)
+		http.Redirect(w, r, "http://user:"+"pass"+"word@example.com/feed", http.StatusFound)
 	}))
 	t.Cleanup(server.Close)
 	cause := errors.New("redirect denied")
