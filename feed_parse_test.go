@@ -224,7 +224,7 @@ func TestJSONFeedFractionalAttachmentDuration(t *testing.T) {
 		t.Errorf("attachments = %#v", items[0].Attachments)
 	}
 	var output strings.Builder
-	if err := writeItems(&output, items, ".", false, true); err != nil {
+	if err := writeItems(&output, items, ".", false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), `"duration_in_seconds":1.5`) {
