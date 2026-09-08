@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -31,6 +32,34 @@ func TestRunFiltersAndAppliesRawJQ(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("stderr = %q", stderr.String())
+	}
+}
+
+func TestRunAcceptsURLsFromStdinAndMergesSources(t *testing.T) {
+	t.Parallel()
+	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
+	server1 := newFeedServer(t, strings.Replace(testRSS, "Example Feed", "Feed One", 1))
+	server2 := newFeedServer(t, strings.Replace(testRSS, "Example Feed", "Feed Two", 1))
+	server3 := newFeedServer(t, strings.Replace(testRSS, "Example Feed", "Feed Three", 1))
+	var stdout, stderr bytes.Buffer
+	err := run(context.Background(), []string{
+		"--jq", "._feed.title", "-r",
+		"--url", server1.URL,
+		"--url", server2.URL,
+		server3.URL,
+	}, strings.NewReader("\n"+server1.URL+"\n"), &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	want := []string{
+		"Feed One", "Feed One", "Feed One", "Feed One",
+		"Feed Two", "Feed Two", "Feed Two", "Feed Two",
+		"Feed Three", "Feed Three", "Feed Three", "Feed Three",
+		"Feed One", "Feed One", "Feed One", "Feed One",
+	}
+	if !reflect.DeepEqual(values, want) {
+		t.Errorf("values = %#v, want %#v", values, want)
 	}
 }
 

@@ -1,11 +1,13 @@
 package rssnip
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -25,11 +27,16 @@ func (ss *stringList) Set(value string) error {
 
 // Run runs rssnip with the supplied command-line arguments.
 func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (runErr error) {
+	return run(ctx, argv, os.Stdin, outStream, errStream)
+}
+
+func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errStream io.Writer) (runErr error) {
 	fs := flag.NewFlagSet(
 		fmt.Sprintf("%s (v%s rev:%s)", cmdName, version, revision), flag.ContinueOnError)
 	fs.SetOutput(errStream)
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: %s [options] [--url URL ...] [URL ...]\n\n", cmdName)
+		fmt.Fprintln(fs.Output(), "Feed URLs may also be read one per line from standard input.")
 		fmt.Fprintln(fs.Output(), "Options:")
 		fs.PrintDefaults()
 	}
@@ -47,7 +54,12 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (ru
 	if *ver {
 		return printVersion(outStream)
 	}
+	stdinURLs, err := readStdinURLs(inStream)
+	if err != nil {
+		return fmt.Errorf("read feed URLs from standard input: %w", err)
+	}
 	urls = append(urls, fs.Args()...)
+	urls = append(urls, stdinURLs...)
 	if len(urls) == 0 {
 		fs.Usage()
 		return fmt.Errorf("at least one feed URL is required")
@@ -92,6 +104,29 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (ru
 		}
 	}
 	return nil
+}
+
+func readStdinURLs(in io.Reader) ([]string, error) {
+	if file, ok := in.(*os.File); ok {
+		info, err := file.Stat()
+		if err != nil {
+			return nil, err
+		}
+		if info.Mode()&os.ModeCharDevice != 0 {
+			return nil, nil
+		}
+	}
+
+	scanner := bufio.NewScanner(in)
+	const maxURLLineSize = 1 << 20
+	scanner.Buffer(make([]byte, 4096), maxURLLineSize)
+	var urls []string
+	for scanner.Scan() {
+		if url := strings.TrimSpace(scanner.Text()); url != "" {
+			urls = append(urls, url)
+		}
+	}
+	return urls, scanner.Err()
 }
 
 func printVersion(out io.Writer) error {
