@@ -87,7 +87,7 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (ru
 				}
 			}
 		}
-		if err := writeItemsWithCodeContext(ctx, outStream, filtered, code, *rawOutput, false); err != nil {
+		if err := writeItemsWithCodeContext(ctx, outStream, filtered, code, *rawOutput); err != nil {
 			return err
 		}
 	}
