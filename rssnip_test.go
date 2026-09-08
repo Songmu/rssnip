@@ -103,6 +103,51 @@ func TestRunWritesJSONLinesByDefault(t *testing.T) {
 	}
 }
 
+func TestRunPreservesMultipleFeedOrder(t *testing.T) {
+	t.Parallel()
+	firstServer := newFeedServer(t, testRSS)
+	secondServer := newFeedServer(t, strings.Replace(testRSS, "<guid>before</guid>", "<guid>other</guid>", 1))
+	var stdout, stderr bytes.Buffer
+	if err := Run(context.Background(), []string{"--url", firstServer.URL, "--url", secondServer.URL}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 8 {
+		t.Fatalf("got %d lines, want 8", len(lines))
+	}
+	var first, second Item
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(lines[4]), &second); err != nil {
+		t.Fatal(err)
+	}
+	if first.ID != "before" || first.Feed.FeedURL != firstServer.URL {
+		t.Errorf("first item = %#v", first)
+	}
+	if second.ID != "other" || second.Feed.FeedURL != secondServer.URL {
+		t.Errorf("second feed item = %#v", second)
+	}
+}
+
+func TestRunJQCanEmitZeroOrMultipleValues(t *testing.T) {
+	t.Parallel()
+	server := newFeedServer(t, testRSS)
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{
+		"--url", server.URL,
+		"--jq", `if .id == "first" then empty elif .id == "second" then [.id, "second-extra"][] else empty end`,
+		"-r",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "second\nsecond-extra\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
 func TestRunErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
