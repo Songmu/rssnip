@@ -101,6 +101,12 @@ type jsonFeedAttachment struct {
 
 func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item, error) {
 	parsedURL, err := url.ParseRequestURI(feedURL)
+	if err != nil {
+		if localURL, parseErr := url.Parse(feedURL); parseErr == nil &&
+			localURL.Scheme == "" && !strings.HasPrefix(feedURL, "://") {
+			return fetchLocalFeed(ctx, feedURL, nil)
+		}
+	}
 	if err == nil && parsedURL.Scheme == "file" {
 		return fetchLocalFeed(ctx, feedURL, parsedURL)
 	}
