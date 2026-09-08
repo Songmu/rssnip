@@ -20,10 +20,13 @@ for pipelines, crawlers, and further processing with tools such as `jq`.
 ```console
 % rssnip --since 2024-01-01 --until 2024-01-31 \
     --url https://example.com/feed.xml
-{"id":"...","url":"https://example.com/article","title":"Example","date_published":"2024-01-15T00:00:00Z","_feed":{"title":"Example Feed","feed_url":"https://example.com/feed.xml"}}
+{"id":"...","url":"https://example.com/article","title":"Example","date_published":"2024-01-15T00:00:00Z"}
 
 % rssnip --url https://example.com/feed.xml --jq '.url' -r
 https://example.com/article
+
+% rssnip --with-feed --url https://example.com/feed.xml
+{"id":"...","url":"https://example.com/article","title":"Example","_feed":{"title":"Example Feed","feed_url":"https://example.com/feed.xml"}}
 ```
 
 ## Description
@@ -35,9 +38,10 @@ https://example.com/article
 - RDF/RSS 1.0
 - JSON Feed 1.0 and 1.1
 
-Each item follows the JSON Feed 1.1 item shape. The `_feed` extension records
-the source feed's title, home page URL, and fetched feed URL, which keeps items
-attributable when multiple feeds are read at once.
+Each item follows the JSON Feed 1.1 item shape. By default, items do not
+include feed-level metadata. The `--with-feed` option adds the `_feed`
+extension, recording the source feed's title, home page URL, and fetched feed
+URL when items need to remain attributable across multiple feeds.
 
 JSON Feed items use their supplied `id`, falling back to `url`. If both are
 missing, a deterministic SHA-256 identifier is generated from the supported
@@ -57,7 +61,7 @@ Without `--jq`, each JSON Lines record conforms to this JSON Schema:
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "rssnip output item",
   "type": "object",
-  "required": ["id", "_feed"],
+  "required": ["id"],
   "additionalProperties": false,
   "properties": {
     "id": { "type": "string" },

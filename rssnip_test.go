@@ -87,7 +87,7 @@ func TestRunWritesJSONLinesByDefault(t *testing.T) {
 	t.Parallel()
 	server := newFeedServer(t, testRSS)
 	var stdout, stderr bytes.Buffer
-	if err := Run(context.Background(), []string{"--url", server.URL}, &stdout, &stderr); err != nil {
+	if err := Run(context.Background(), []string{"--with-feed", "--url", server.URL}, &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
@@ -99,7 +99,19 @@ func TestRunWritesJSONLinesByDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	if item.ID != "before" || item.Feed.FeedURL != server.URL {
-		t.Errorf("unexpected item: %#v", item)
+		t.Errorf("unexpected item with feed metadata: %#v", item)
+	}
+}
+
+func TestRunOmitsFeedMetadataByDefault(t *testing.T) {
+	t.Parallel()
+	server := newFeedServer(t, testRSS)
+	var stdout, stderr bytes.Buffer
+	if err := Run(context.Background(), []string{"--url", server.URL}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), `"_feed"`) {
+		t.Errorf("default output contains feed metadata: %s", stdout.String())
 	}
 }
 
@@ -108,7 +120,7 @@ func TestRunPreservesMultipleFeedOrder(t *testing.T) {
 	firstServer := newFeedServer(t, testRSS)
 	secondServer := newFeedServer(t, strings.Replace(testRSS, "<guid>before</guid>", "<guid>other</guid>", 1))
 	var stdout, stderr bytes.Buffer
-	if err := Run(context.Background(), []string{"--url", firstServer.URL, "--url", secondServer.URL}, &stdout, &stderr); err != nil {
+	if err := Run(context.Background(), []string{"--with-feed", "--url", firstServer.URL, "--url", secondServer.URL}, &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")

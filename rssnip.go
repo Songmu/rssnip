@@ -41,6 +41,7 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (ru
 	untilValue := fs.String("until", "", "include items on or before RFC3339 time or YYYY-MM-DD")
 	jqExpression := fs.String("jq", "", "apply a jq expression to each item")
 	rawOutput := fs.Bool("r", false, "write string jq results without JSON quoting")
+	withFeed := fs.Bool("with-feed", false, "include source feed information in each item")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
@@ -87,7 +88,7 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (ru
 				}
 			}
 		}
-		if err := writeItemsWithCodeContext(ctx, outStream, filtered, code, *rawOutput); err != nil {
+		if err := writeItemsWithCodeContextAndFeed(ctx, outStream, filtered, code, *rawOutput, *withFeed); err != nil {
 			return err
 		}
 	}
