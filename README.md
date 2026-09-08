@@ -46,8 +46,8 @@ are ignored; changing a supported field changes the generated identifier.
 
 By default, every item is emitted as one compact JSON object per line. Use
 `--json` to emit one JSON array instead. Feed URLs may be supplied by repeating
-`--url`, as positional arguments, or by combining both forms; output preserves
-feed and item order.
+`--url`, as positional arguments, or by combining both forms; local XML files may
+also be supplied as paths or `file://` URLs. Output preserves feed and item order.
 
 ### Output schema
 

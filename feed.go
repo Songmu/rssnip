@@ -12,6 +12,8 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -99,6 +101,12 @@ type jsonFeedAttachment struct {
 
 func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item, error) {
 	parsedURL, err := url.ParseRequestURI(feedURL)
+	if err == nil && parsedURL.Scheme == "file" {
+		return fetchLocalFeed(ctx, feedURL, parsedURL)
+	}
+	if err == nil && parsedURL.Scheme == "" && parsedURL.Host == "" {
+		return fetchLocalFeed(ctx, feedURL, nil)
+	}
 	if err != nil || parsedURL.Host == "" ||
 		(parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
 		if err == nil {
@@ -146,6 +154,49 @@ func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item
 		sourceURL = resp.Request.URL.String()
 	}
 	sourceURL = displayURL(sourceURL)
+	return parseFeed(body, sourceURL)
+}
+
+func fetchLocalFeed(ctx context.Context, feedName string, parsedURL *url.URL) ([]Item, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	path := feedName
+	if parsedURL != nil {
+		if parsedURL.Host != "" && parsedURL.Host != "localhost" {
+			return nil, fmt.Errorf("invalid feed URL %q: file URL host is not allowed", displayURL(feedName))
+		}
+		path = filepath.FromSlash(parsedURL.Path)
+		if path == "" {
+			return nil, fmt.Errorf("invalid feed URL %q: file path is empty", displayURL(feedName))
+		}
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open feed %q: %w", feedName, err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat feed %q: %w", feedName, err)
+	}
+	if info.Size() > maxFeedSize {
+		return nil, fmt.Errorf("read %q: feed exceeds %d MiB limit", feedName, maxFeedSize>>20)
+	}
+	body, err := io.ReadAll(io.LimitReader(file, maxFeedSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("read %q: %w", feedName, err)
+	}
+	if len(body) > maxFeedSize {
+		return nil, fmt.Errorf("read %q: feed exceeds %d MiB limit", feedName, maxFeedSize>>20)
+	}
+	sourceURL := feedName
+	if parsedURL == nil {
+		absolutePath, err := filepath.Abs(path)
+		if err == nil {
+			sourceURL = (&url.URL{Scheme: "file", Path: filepath.ToSlash(absolutePath)}).String()
+		}
+	}
 	return parseFeed(body, sourceURL)
 }
 

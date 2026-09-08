@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -193,6 +196,25 @@ func TestRunWritesJSONLinesByDefault(t *testing.T) {
 	}
 }
 
+func TestRunAcceptsLocalFeedPathAndFileURL(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "feed.xml")
+	if err := os.WriteFile(path, []byte(testRSS), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, feed := range []string{path, (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()} {
+		var stdout, stderr bytes.Buffer
+		if err := Run(context.Background(), []string{feed}, &stdout, &stderr); err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+		if len(lines) != 4 {
+			t.Fatalf("got %d lines for %q, want 4", len(lines), feed)
+		}
+	}
+}
+
 func TestRunErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -206,7 +228,7 @@ func TestRunErrors(t *testing.T) {
 		{"invalid since", []string{"--since", "yesterday", "https://example.com/feed"}, "invalid --since"},
 		{"reversed period", []string{"--since", "2024-02-01", "--until", "2024-01-01", "https://example.com/feed"}, "--since must not be after --until"},
 		{"invalid URL", []string{"--jq", ".", "://bad"}, "invalid feed URL"},
-		{"relative URL", []string{"feed.xml"}, "invalid feed URL"},
+		{"missing local file", []string{"feed.xml"}, "open feed"},
 		{"non-HTTP URL", []string{"ftp://example.com/feed"}, "invalid feed URL"},
 		{"credential URL", []string{"http://user:" + "password@example.com/feed"}, "userinfo is not allowed"},
 	}
