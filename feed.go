@@ -167,7 +167,7 @@ func fetchLocalFeed(ctx context.Context, feedName string, parsedURL *url.URL) ([
 	}
 	path := feedName
 	if parsedURL != nil {
-		if parsedURL.Host != "" && parsedURL.Host != "localhost" {
+		if parsedURL.Host != "" && !strings.EqualFold(parsedURL.Host, "localhost") {
 			return nil, fmt.Errorf("invalid feed URL %q: file URL host is not allowed", displayURL(feedName))
 		}
 		path = localPathFromFileURL(parsedURL)
@@ -175,15 +175,18 @@ func fetchLocalFeed(ctx context.Context, feedName string, parsedURL *url.URL) ([
 			return nil, fmt.Errorf("invalid feed URL %q: file path is empty", displayURL(feedName))
 		}
 	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("stat feed %q: %w", feedName, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("open feed %q: not a regular file", feedName)
+	}
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open feed %q: %w", feedName, err)
 	}
 	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("stat feed %q: %w", feedName, err)
-	}
 	if info.Size() > maxFeedSize {
 		return nil, fmt.Errorf("read %q: feed exceeds %d MiB limit", feedName, maxFeedSize>>20)
 	}
@@ -223,7 +226,11 @@ func hasURLScheme(value string) bool {
 	if colon <= 0 {
 		return false
 	}
-	for _, char := range value[:colon] {
+	first := value[0]
+	if (first < 'a' || first > 'z') && (first < 'A' || first > 'Z') {
+		return false
+	}
+	for _, char := range value[1:colon] {
 		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') &&
 			(char < '0' || char > '9') && char != '+' && char != '-' && char != '.' {
 			return false

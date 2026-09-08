@@ -71,6 +71,34 @@ func TestRunAcceptsLocalPathWithInvalidURLSyntax(t *testing.T) {
 	}
 }
 
+func TestRunAcceptsLocalPathWithDigitLeadingScheme(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "1:feed.xml")
+	if err := os.WriteFile(path, mustReadTestdata(t, "sample_rss.xml"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if err := Run(context.Background(), []string{path}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunAcceptsFileURLWithUppercaseLocalhost(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "feed.xml")
+	if err := os.WriteFile(path, mustReadTestdata(t, "sample_rss.xml"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fileURL := fileURLFromLocalPath(path)
+	fileURL = strings.Replace(fileURL, "file://", "file://LOCALHOST", 1)
+	var stdout, stderr bytes.Buffer
+	if err := Run(context.Background(), []string{fileURL}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunAcceptsURLsFromStdinAndMergesSources(t *testing.T) {
 	t.Parallel()
 	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
@@ -192,7 +220,7 @@ func TestRunErrors(t *testing.T) {
 		{"invalid since", []string{"--since", "yesterday", "https://example.com/feed"}, "invalid --since"},
 		{"reversed period", []string{"--since", "2024-02-01", "--until", "2024-01-01", "https://example.com/feed"}, "--since must not be after --until"},
 		{"invalid URL", []string{"--jq", ".", "://bad"}, "invalid feed URL"},
-		{"missing local file", []string{"feed.xml"}, "open feed"},
+		{"missing local file", []string{"feed.xml"}, "stat feed"},
 		{"non-HTTP URL", []string{"ftp://example.com/feed"}, "invalid feed URL"},
 		{"credential URL", []string{"http://user:" + "password@example.com/feed"}, "userinfo is not allowed"},
 		{"credential file URL", []string{"file://user:" + "password@localhost/feed.xml"}, "userinfo is not allowed"},
