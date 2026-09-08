@@ -107,6 +107,7 @@ func TestRunAcceptsURLsFromStdinAndMergesSources(t *testing.T) {
 	server3 := newFeedServer(t, strings.Replace(testRSS, "Example Feed", "Feed Three", 1))
 	var stdout, stderr bytes.Buffer
 	err := run(context.Background(), []string{
+		"--with-feed",
 		"--jq", "._feed.title", "-r",
 		"--url", server1.URL,
 		"--url", server2.URL,
@@ -127,13 +128,41 @@ func TestRunAcceptsURLsFromStdinAndMergesSources(t *testing.T) {
 	}
 }
 
+func TestRunJQFeedMetadataIsOptIn(t *testing.T) {
+	t.Parallel()
+	server := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
+	for _, tt := range []struct {
+		name     string
+		withFeed bool
+		want     string
+	}{
+		{name: "omitted by default", want: "false\n"},
+		{name: "included with flag", withFeed: true, want: "true\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var stdout, stderr bytes.Buffer
+			args := []string{"--url", server.URL, "--jq", `if .id == "before" then has("_feed") else empty end`}
+			if tt.withFeed {
+				args = append(args, "--with-feed")
+			}
+			if err := Run(context.Background(), args, &stdout, &stderr); err != nil {
+				t.Fatal(err)
+			}
+			if got := stdout.String(); got != tt.want {
+				t.Errorf("stdout = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRunPreservesMultipleFeedOrder(t *testing.T) {
 	t.Parallel()
 	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
 	firstServer := newFeedServer(t, testRSS)
 	secondServer := newFeedServer(t, strings.Replace(testRSS, "<guid>before</guid>", "<guid>other</guid>", 1))
 	var stdout, stderr bytes.Buffer
-	if err := Run(context.Background(), []string{"--url", firstServer.URL, "--url", secondServer.URL}, &stdout, &stderr); err != nil {
+	if err := Run(context.Background(), []string{"--with-feed", "--url", firstServer.URL, "--url", secondServer.URL}, &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
@@ -187,7 +216,7 @@ func TestRunStreamsJSONLinesBeforeLaterFeedFailure(t *testing.T) {
 	}
 }
 
-func TestRunWritesJSONLinesByDefault(t *testing.T) {
+func TestRunWritesJSONLinesWithoutFeedMetadataByDefault(t *testing.T) {
 	t.Parallel()
 	server := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
 	var stdout, stderr bytes.Buffer
@@ -202,7 +231,7 @@ func TestRunWritesJSONLinesByDefault(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[0]), &item); err != nil {
 		t.Fatal(err)
 	}
-	if item.ID != "before" || item.Feed.FeedURL != server.URL {
+	if item.ID != "before" || item.Feed.FeedURL != "" {
 		t.Errorf("unexpected item: %#v", item)
 	}
 }
