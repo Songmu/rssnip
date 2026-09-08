@@ -105,14 +105,14 @@ func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item
 		return fetchLocalFeed(ctx, feedURL, nil)
 	}
 	parsedURL, err := url.Parse(feedURL)
-	if err == nil && parsedURL.Scheme == "file" {
+	if err == nil && strings.EqualFold(parsedURL.Scheme, "file") {
 		if parsedURL.User != nil {
 			return nil, fmt.Errorf("invalid feed URL %q: userinfo is not allowed", displayURL(feedURL))
 		}
 		return fetchLocalFeed(ctx, feedURL, parsedURL)
 	}
 	if err != nil || parsedURL.Host == "" ||
-		(parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+		(!strings.EqualFold(parsedURL.Scheme, "http") && !strings.EqualFold(parsedURL.Scheme, "https")) {
 		if err == nil {
 			err = fmt.Errorf("must be an absolute HTTP or HTTPS URL")
 		}

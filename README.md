@@ -146,7 +146,7 @@ https://example.com/go-article
 
 ### Initial scope
 
-The initial release fetches explicit feed URLs. HTML feed discovery, feed
+The initial release fetches explicit feed sources, including local feed files. HTML feed discovery, feed
 pagination, conditional requests, persistent caching, and natural-language
 date expressions are intentionally outside its scope.
 

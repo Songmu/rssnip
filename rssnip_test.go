@@ -44,7 +44,8 @@ func TestRunAcceptsLocalFeedPathAndFileURL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, feed := range []string{path, fileURLFromLocalPath(path)} {
+	fileURL := fileURLFromLocalPath(path)
+	for _, feed := range []string{path, fileURL, strings.Replace(fileURL, "file:", "FILE:", 1)} {
 		var stdout, stderr bytes.Buffer
 		if err := Run(context.Background(), []string{feed}, &stdout, &stderr); err != nil {
 			t.Fatal(err)
