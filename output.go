@@ -33,10 +33,6 @@ func compileQuery(expression string) (*gojq.Code, error) {
 	return code, nil
 }
 
-func writeItemsWithCode(out io.Writer, items []Item, code *gojq.Code, raw, asJSON bool) error {
-	return writeItemsWithCodeContext(context.Background(), out, items, code, raw, asJSON)
-}
-
 func writeItemsWithCodeContext(ctx context.Context, out io.Writer, items []Item, code *gojq.Code, raw, asJSON bool) error {
 	encoder := json.NewEncoder(out)
 	encoder.SetEscapeHTML(false)
