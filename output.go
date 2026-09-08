@@ -10,12 +10,12 @@ import (
 	"github.com/itchyny/gojq"
 )
 
-func writeItems(out io.Writer, items []Item, expression string, raw, asJSON bool) error {
+func writeItems(out io.Writer, items []Item, expression string, raw bool) error {
 	code, err := compileQuery(expression)
 	if err != nil {
 		return err
 	}
-	return writeItemsWithCodeContext(context.Background(), out, items, code, raw, asJSON)
+	return writeItemsWithCodeContext(context.Background(), out, items, code, raw)
 }
 
 func compileQuery(expression string) (*gojq.Code, error) {
@@ -33,28 +33,10 @@ func compileQuery(expression string) (*gojq.Code, error) {
 	return code, nil
 }
 
-func writeItemsWithCodeContext(ctx context.Context, out io.Writer, items []Item, code *gojq.Code, raw, asJSON bool) error {
+func writeItemsWithCodeContext(ctx context.Context, out io.Writer, items []Item, code *gojq.Code, raw bool) error {
 	encoder := json.NewEncoder(out)
 	encoder.SetEscapeHTML(false)
-	first := true
-	if asJSON {
-		if _, err := fmt.Fprint(out, "["); err != nil {
-			return fmt.Errorf("write output: %w", err)
-		}
-	}
 	err := writeItemValues(ctx, items, code, func(value any) error {
-		if asJSON {
-			if !first {
-				if _, err := fmt.Fprint(out, ","); err != nil {
-					return fmt.Errorf("write output: %w", err)
-				}
-			}
-			first = false
-			if err := encoder.Encode(value); err != nil {
-				return fmt.Errorf("write output: %w", err)
-			}
-			return nil
-		}
 		if raw {
 			if text, ok := value.(string); ok {
 				if _, err := fmt.Fprintln(out, text); err != nil {
@@ -70,11 +52,6 @@ func writeItemsWithCodeContext(ctx context.Context, out io.Writer, items []Item,
 	})
 	if err != nil {
 		return err
-	}
-	if asJSON {
-		if _, err := fmt.Fprint(out, "]\n"); err != nil {
-			return fmt.Errorf("write output: %w", err)
-		}
 	}
 	return nil
 }

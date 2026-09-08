@@ -47,15 +47,14 @@ missing, a deterministic SHA-256 identifier is generated from the supported
 item fields before normalization. Unknown fields (including custom extensions)
 are ignored; changing a supported field changes the generated identifier.
 
-By default, every item is emitted as one compact JSON object per line. Use
-`--json` to emit one JSON array instead. Feed URLs may be supplied by repeating `--url`, as positional arguments, one
-per line on standard input, or by combining any of these forms; output
-preserves feed and item order.
+Every item is emitted as one compact JSON object per line. Feed URLs may be
+supplied by repeating `--url`, as positional arguments, one per line on
+standard input, or by combining any of these forms; output preserves feed and
+item order.
 
 ### Output schema
 
-Without `--jq`, each JSON Lines record (or each `--json` array element)
-conforms to this JSON Schema:
+Without `--jq`, each JSON Lines record conforms to this JSON Schema:
 
 ```json
 {
@@ -147,9 +146,6 @@ without JSON quoting and requires `--jq`.
     --jq 'select(.tags | index("go")) | .url' -r
 https://example.com/go-article
 ```
-
-`--json` collects all jq results in its output array. `-r` and `--json` cannot
-be combined.
 
 ### Initial scope
 

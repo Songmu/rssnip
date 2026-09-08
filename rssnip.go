@@ -3,7 +3,6 @@ package rssnip
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -49,7 +48,6 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 	untilValue := fs.String("until", "", "include items on or before RFC3339 time or YYYY-MM-DD")
 	jqExpression := fs.String("jq", "", "apply a jq expression to each item")
 	rawOutput := fs.Bool("r", false, "write string jq results without JSON quoting")
-	jsonOutput := fs.Bool("json", false, "write one JSON array instead of JSON Lines")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
@@ -69,9 +67,6 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 	if *rawOutput && *jqExpression == "" {
 		return fmt.Errorf("-r requires --jq")
 	}
-	if *rawOutput && *jsonOutput {
-		return fmt.Errorf("-r and --json cannot be used together")
-	}
 
 	since, err := parseTimeBound(*sinceValue, false)
 	if err != nil {
@@ -90,20 +85,6 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
-	var encoder *json.Encoder
-	firstJSONValue := true
-	if *jsonOutput {
-		if _, err := fmt.Fprint(outStream, "["); err != nil {
-			return fmt.Errorf("write output: %w", err)
-		}
-		defer func() {
-			if _, err := fmt.Fprint(outStream, "]\n"); err != nil && runErr == nil {
-				runErr = fmt.Errorf("write output: %w", err)
-			}
-		}()
-		encoder = json.NewEncoder(outStream)
-		encoder.SetEscapeHTML(false)
-	}
 	for _, feedURL := range urls {
 		feedItems, err := fetchFeed(ctx, client, feedURL)
 		if err != nil {
@@ -118,24 +99,7 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 				}
 			}
 		}
-		if *jsonOutput {
-			if err := writeItemValues(ctx, filtered, code, func(value any) error {
-				if !firstJSONValue {
-					if _, err := fmt.Fprint(outStream, ","); err != nil {
-						return fmt.Errorf("write output: %w", err)
-					}
-				}
-				firstJSONValue = false
-				if err := encoder.Encode(value); err != nil {
-					return fmt.Errorf("write output: %w", err)
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := writeItemsWithCodeContext(ctx, outStream, filtered, code, *rawOutput, false); err != nil {
+		if err := writeItemsWithCodeContext(ctx, outStream, filtered, code, *rawOutput); err != nil {
 			return err
 		}
 	}
@@ -145,7 +109,10 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 func readStdinURLs(in io.Reader) ([]string, error) {
 	if file, ok := in.(*os.File); ok {
 		info, err := file.Stat()
-		if err == nil && info.Mode()&os.ModeCharDevice != 0 {
+		if err != nil {
+			return nil, nil
+		}
+		if info.Mode()&os.ModeCharDevice != 0 {
 			return nil, nil
 		}
 	}
