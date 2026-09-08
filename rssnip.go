@@ -2,7 +2,6 @@ package rssnip
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -42,7 +41,6 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (ru
 	untilValue := fs.String("until", "", "include items on or before RFC3339 time or YYYY-MM-DD")
 	jqExpression := fs.String("jq", "", "apply a jq expression to each item")
 	rawOutput := fs.Bool("r", false, "write string jq results without JSON quoting")
-	jsonOutput := fs.Bool("json", false, "write one JSON array instead of JSON Lines")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
@@ -56,9 +54,6 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (ru
 	}
 	if *rawOutput && *jqExpression == "" {
 		return fmt.Errorf("-r requires --jq")
-	}
-	if *rawOutput && *jsonOutput {
-		return fmt.Errorf("-r and --json cannot be used together")
 	}
 
 	since, err := parseTimeBound(*sinceValue, false)
@@ -78,20 +73,6 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (ru
 	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
-	var encoder *json.Encoder
-	firstJSONValue := true
-	if *jsonOutput {
-		if _, err := fmt.Fprint(outStream, "["); err != nil {
-			return fmt.Errorf("write output: %w", err)
-		}
-		defer func() {
-			if _, err := fmt.Fprint(outStream, "]\n"); err != nil && runErr == nil {
-				runErr = fmt.Errorf("write output: %w", err)
-			}
-		}()
-		encoder = json.NewEncoder(outStream)
-		encoder.SetEscapeHTML(false)
-	}
 	for _, feedURL := range urls {
 		feedItems, err := fetchFeed(ctx, client, feedURL)
 		if err != nil {
@@ -105,23 +86,6 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (ru
 					filtered = append(filtered, item)
 				}
 			}
-		}
-		if *jsonOutput {
-			if err := writeItemValues(ctx, filtered, code, func(value any) error {
-				if !firstJSONValue {
-					if _, err := fmt.Fprint(outStream, ","); err != nil {
-						return fmt.Errorf("write output: %w", err)
-					}
-				}
-				firstJSONValue = false
-				if err := encoder.Encode(value); err != nil {
-					return fmt.Errorf("write output: %w", err)
-				}
-				return nil
-			}); err != nil {
-				return err
-			}
-			continue
 		}
 		if err := writeItemsWithCodeContext(ctx, outStream, filtered, code, *rawOutput, false); err != nil {
 			return err

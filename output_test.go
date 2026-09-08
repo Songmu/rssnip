@@ -21,7 +21,7 @@ func TestWriteItemsPreservesIntegersWithoutJQ(t *testing.T) {
 		Feed: FeedInfo{FeedURL: "https://example.com/feed"},
 	}
 	var output bytes.Buffer
-	if err := writeItems(&output, []Item{item}, "", false, false); err != nil {
+	if err := writeItems(&output, []Item{item}, "", false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), `"size_in_bytes":9223372036854775807`) {
@@ -41,7 +41,7 @@ func TestWriteItemsPreservesIntegersWithJQ(t *testing.T) {
 		Feed: FeedInfo{FeedURL: "https://example.com/feed"},
 	}
 	var output bytes.Buffer
-	if err := writeItems(&output, []Item{item}, ".", false, false); err != nil {
+	if err := writeItems(&output, []Item{item}, ".", false); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(output.String(), `"size_in_bytes":9223372036854775807`) {
@@ -56,7 +56,7 @@ func TestWriteItemsWrapsRawOutputErrors(t *testing.T) {
 		Title: "title",
 		Feed:  FeedInfo{FeedURL: "https://example.com/feed"},
 	}
-	err := writeItems(failingWriter{}, []Item{item}, ".title", true, false)
+	err := writeItems(failingWriter{}, []Item{item}, ".title", true)
 	if err == nil || !strings.Contains(err.Error(), "write output: write failed") {
 		t.Fatalf("error = %v", err)
 	}
