@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>Example Feed</title>
+    <link>https://example.com/</link>
+    <item>
+      <guid>before</guid>
+      <title>Before</title>
+      <link>https://example.com/before</link>
+      <pubDate>Sun, 31 Dec 2023 23:59:59 GMT</pubDate>
+    </item>
+    <item>
+      <guid>first</guid>
+      <title>First</title>
+      <link>https://example.com/first</link>
+      <pubDate>Mon, 01 Jan 2024 00:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <guid>second</guid>
+      <title>Second</title>
+      <link>https://example.com/second</link>
+      <pubDate>Wed, 31 Jan 2024 23:59:59 GMT</pubDate>
+    </item>
+    <item>
+      <guid>after</guid>
+      <title>After</title>
+      <link>https://example.com/after</link>
+      <pubDate>Thu, 01 Feb 2024 00:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>
