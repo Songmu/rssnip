@@ -1,0 +1,6 @@
+{"version":"https://jsonfeed.org/version/1.1","items":[
+  {"id":"episode","attachments":[
+    {"url":"https://example.com/audio","mime_type":"audio/mpeg","duration_in_seconds":1.5},
+    {"url":"https://example.com/other","mime_type":"audio/mpeg","duration_in_seconds":-0.5}
+  ]}
+]}

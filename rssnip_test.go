@@ -12,41 +12,9 @@ import (
 	"testing"
 )
 
-const testRSS = `<?xml version="1.0"?>
-<rss version="2.0">
-  <channel>
-    <title>Example Feed</title>
-    <link>https://example.com/</link>
-    <item>
-      <guid>before</guid>
-      <title>Before</title>
-      <link>https://example.com/before</link>
-      <pubDate>Sun, 31 Dec 2023 23:59:59 GMT</pubDate>
-    </item>
-    <item>
-      <guid>first</guid>
-      <title>First</title>
-      <link>https://example.com/first</link>
-      <pubDate>Mon, 01 Jan 2024 00:00:00 GMT</pubDate>
-    </item>
-    <item>
-      <guid>second</guid>
-      <title>Second</title>
-      <link>https://example.com/second</link>
-      <pubDate>Wed, 31 Jan 2024 23:59:59 GMT</pubDate>
-    </item>
-    <item>
-      <guid>after</guid>
-      <title>After</title>
-      <link>https://example.com/after</link>
-      <pubDate>Thu, 01 Feb 2024 00:00:00 GMT</pubDate>
-    </item>
-  </channel>
-</rss>`
-
 func TestRunFiltersAndAppliesRawJQ(t *testing.T) {
 	t.Parallel()
-	server := newFeedServer(t, testRSS)
+	server := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
 	var stdout, stderr bytes.Buffer
 	err := Run(context.Background(), []string{
 		"--url", server.URL,
@@ -69,6 +37,7 @@ func TestRunFiltersAndAppliesRawJQ(t *testing.T) {
 
 func TestRunAcceptsMultipleURLsAndWritesJSONArray(t *testing.T) {
 	t.Parallel()
+	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
 	server1 := newFeedServer(t, strings.Replace(testRSS, "Example Feed", "Feed One", 1))
 	server2 := newFeedServer(t, strings.Replace(testRSS, "Example Feed", "Feed Two", 1))
 	var stdout, stderr bytes.Buffer
@@ -98,7 +67,7 @@ func TestRunAcceptsMultipleURLsAndWritesJSONArray(t *testing.T) {
 
 func TestRunJQZeroAndMultipleValuesInJSONArray(t *testing.T) {
 	t.Parallel()
-	server := newFeedServer(t, testRSS)
+	server := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
 
 	t.Run("empty", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
@@ -135,11 +104,8 @@ func TestRunJQZeroAndMultipleValuesInJSONArray(t *testing.T) {
 
 func TestRunFinalizesJSONArrayAfterProcessingError(t *testing.T) {
 	t.Parallel()
-	goodServer := newFeedServer(t, testRSS)
-	badServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "no", http.StatusBadGateway)
-	}))
-	t.Cleanup(badServer.Close)
+	goodServer := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
+	badServer := newBadGatewayServer(t)
 	var stdout, stderr bytes.Buffer
 	err := Run(context.Background(), []string{
 		"--json", goodServer.URL, badServer.URL,
@@ -158,11 +124,8 @@ func TestRunFinalizesJSONArrayAfterProcessingError(t *testing.T) {
 
 func TestRunStreamsJSONLinesBeforeLaterFeedFailure(t *testing.T) {
 	t.Parallel()
-	goodServer := newFeedServer(t, testRSS)
-	badServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "no", http.StatusBadGateway)
-	}))
-	t.Cleanup(badServer.Close)
+	goodServer := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
+	badServer := newBadGatewayServer(t)
 	var stdout, stderr bytes.Buffer
 	err := Run(context.Background(), []string{goodServer.URL, badServer.URL}, &stdout, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "502 Bad Gateway") {
@@ -175,7 +138,7 @@ func TestRunStreamsJSONLinesBeforeLaterFeedFailure(t *testing.T) {
 
 func TestRunWritesJSONLinesByDefault(t *testing.T) {
 	t.Parallel()
-	server := newFeedServer(t, testRSS)
+	server := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
 	var stdout, stderr bytes.Buffer
 	if err := Run(context.Background(), []string{"--url", server.URL}, &stdout, &stderr); err != nil {
 		t.Fatal(err)
@@ -228,10 +191,7 @@ func TestRunErrors(t *testing.T) {
 
 func TestRunReportsHTTPError(t *testing.T) {
 	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "no", http.StatusBadGateway)
-	}))
-	t.Cleanup(server.Close)
+	server := newBadGatewayServer(t)
 	var stdout, stderr bytes.Buffer
 	err := Run(context.Background(), []string{server.URL}, &stdout, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "502 Bad Gateway") {
@@ -255,27 +215,10 @@ func TestRunRejectsOversizedFeed(t *testing.T) {
 
 func TestRunReportsInvalidJQ(t *testing.T) {
 	t.Parallel()
-	server := newFeedServer(t, testRSS)
+	server := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
 	var stdout, stderr bytes.Buffer
 	err := Run(context.Background(), []string{"--jq", "[", server.URL}, &stdout, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "parse --jq expression") {
 		t.Fatalf("error = %v", err)
 	}
-}
-
-func newFeedServer(t *testing.T, body string) *httptest.Server {
-	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("User-Agent"); !strings.HasPrefix(got, "rssnip/") {
-			t.Errorf("User-Agent = %q", got)
-		}
-		accept := r.Header.Get("Accept")
-		if !strings.Contains(accept, "application/json") || !strings.Contains(accept, "*/*") {
-			t.Errorf("Accept = %q", accept)
-		}
-		w.Header().Set("Content-Type", "application/rss+xml")
-		fmt.Fprint(w, body)
-	}))
-	t.Cleanup(server.Close)
-	return server
 }
