@@ -24,6 +24,9 @@ for pipelines, crawlers, and further processing with tools such as `jq`.
 
 % rssnip --url https://example.com/feed.xml --jq '.url' -r
 https://example.com/article
+
+% printf '%s\n' https://example.com/feed.xml | rssnip
+{"id":"...","url":"https://example.com/article",...}
 ```
 
 ## Description

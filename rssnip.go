@@ -37,6 +37,7 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 	fs.SetOutput(errStream)
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: %s [options] [--url URL ...] [URL ...]\n\n", cmdName)
+		fmt.Fprintln(fs.Output(), "Feed URLs may also be read one per line from standard input.")
 		fmt.Fprintln(fs.Output(), "Options:")
 		fs.PrintDefaults()
 	}
