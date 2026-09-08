@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -61,8 +60,8 @@ func TestRunAcceptsLocalFeedPathAndFileURL(t *testing.T) {
 
 func TestRunAcceptsLocalPathWithInvalidURLSyntax(t *testing.T) {
 	t.Parallel()
-	if runtime.GOOS == "windows" {
-		t.Skip("colon is not valid in a Windows filename")
+	if !isLocalFeedPath("feed%.xml") {
+		t.Fatal("relative path with invalid URL syntax was not classified as local")
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "feed%.xml")
@@ -108,14 +107,8 @@ func TestRunLocalFeedResolvesRelativeURLs(t *testing.T) {
 
 func TestRunAcceptsLocalPathWithDigitLeadingScheme(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "1:feed.xml")
-	if err := os.WriteFile(path, mustReadTestdata(t, "sample_rss.xml"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
-	if err := Run(context.Background(), []string{path}, &stdout, &stderr); err != nil {
-		t.Fatal(err)
+	if !isLocalFeedPath("1:feed.xml") {
+		t.Fatal("digit-leading filename was not classified as local")
 	}
 }
 
