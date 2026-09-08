@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -100,18 +101,15 @@ type jsonFeedAttachment struct {
 }
 
 func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item, error) {
-	parsedURL, err := url.ParseRequestURI(feedURL)
-	if err != nil {
-		if localURL, parseErr := url.Parse(feedURL); parseErr == nil &&
-			localURL.Scheme == "" && !strings.HasPrefix(feedURL, "://") {
-			return fetchLocalFeed(ctx, feedURL, nil)
-		}
-	}
-	if err == nil && parsedURL.Scheme == "file" {
-		return fetchLocalFeed(ctx, feedURL, parsedURL)
-	}
-	if err == nil && parsedURL.Scheme == "" && parsedURL.Host == "" {
+	if isLocalFeedPath(feedURL) {
 		return fetchLocalFeed(ctx, feedURL, nil)
+	}
+	parsedURL, err := url.Parse(feedURL)
+	if err == nil && parsedURL.Scheme == "file" {
+		if parsedURL.User != nil {
+			return nil, fmt.Errorf("invalid feed URL %q: userinfo is not allowed", displayURL(feedURL))
+		}
+		return fetchLocalFeed(ctx, feedURL, parsedURL)
 	}
 	if err != nil || parsedURL.Host == "" ||
 		(parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
@@ -172,7 +170,7 @@ func fetchLocalFeed(ctx context.Context, feedName string, parsedURL *url.URL) ([
 		if parsedURL.Host != "" && parsedURL.Host != "localhost" {
 			return nil, fmt.Errorf("invalid feed URL %q: file URL host is not allowed", displayURL(feedName))
 		}
-		path = filepath.FromSlash(parsedURL.Path)
+		path = localPathFromFileURL(parsedURL)
 		if path == "" {
 			return nil, fmt.Errorf("invalid feed URL %q: file path is empty", displayURL(feedName))
 		}
@@ -200,10 +198,60 @@ func fetchLocalFeed(ctx context.Context, feedName string, parsedURL *url.URL) ([
 	if parsedURL == nil {
 		absolutePath, err := filepath.Abs(path)
 		if err == nil {
-			sourceURL = (&url.URL{Scheme: "file", Path: filepath.ToSlash(absolutePath)}).String()
+			sourceURL = fileURLFromLocalPath(absolutePath)
 		}
 	}
 	return parseFeed(body, sourceURL)
+}
+
+func isLocalFeedPath(value string) bool {
+	if isWindowsAbsolutePath(value) {
+		return true
+	}
+	if strings.HasPrefix(value, "://") {
+		return false
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return !hasURLScheme(value)
+	}
+	return parsed.Scheme == "" && parsed.Host == ""
+}
+
+func hasURLScheme(value string) bool {
+	colon := strings.IndexByte(value, ':')
+	if colon <= 0 {
+		return false
+	}
+	for _, char := range value[:colon] {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') &&
+			(char < '0' || char > '9') && char != '+' && char != '-' && char != '.' {
+			return false
+		}
+	}
+	return true
+}
+
+func isWindowsAbsolutePath(value string) bool {
+	return len(value) >= 3 &&
+		((value[0] >= 'a' && value[0] <= 'z') || (value[0] >= 'A' && value[0] <= 'Z')) &&
+		value[1] == ':' && (value[2] == '/' || value[2] == '\\')
+}
+
+func localPathFromFileURL(fileURL *url.URL) string {
+	path := fileURL.Path
+	if runtime.GOOS == "windows" && len(path) > 1 && isWindowsAbsolutePath(path[1:]) {
+		path = strings.TrimPrefix(path, "/")
+	}
+	return filepath.FromSlash(path)
+}
+
+func fileURLFromLocalPath(path string) string {
+	path = filepath.ToSlash(path)
+	if runtime.GOOS == "windows" && isWindowsAbsolutePath(path) {
+		path = "/" + path
+	}
+	return (&url.URL{Scheme: "file", Path: path}).String()
 }
 
 func parseFeed(body []byte, sourceURL string) ([]Item, error) {

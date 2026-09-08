@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -203,7 +202,8 @@ func TestRunAcceptsLocalFeedPathAndFileURL(t *testing.T) {
 	if err := os.WriteFile(path, []byte(testRSS), 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, feed := range []string{path, (&url.URL{Scheme: "file", Path: filepath.ToSlash(path)}).String()} {
+
+	for _, feed := range []string{path, fileURLFromLocalPath(path)} {
 		var stdout, stderr bytes.Buffer
 		if err := Run(context.Background(), []string{feed}, &stdout, &stderr); err != nil {
 			t.Fatal(err)
@@ -215,6 +215,19 @@ func TestRunAcceptsLocalFeedPathAndFileURL(t *testing.T) {
 	}
 }
 
+func TestRunAcceptsLocalPathWithInvalidURLSyntax(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "feed%.xml")
+	if err := os.WriteFile(path, []byte(testRSS), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if err := Run(context.Background(), []string{path}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -222,7 +235,7 @@ func TestRunErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"missing URL", nil, "at least one feed URL is required"},
+		{"missing URL", nil, "at least one feed source is required"},
 		{"raw without jq", []string{"-r", "https://example.com/feed"}, "-r requires --jq"},
 		{"raw JSON", []string{"-r", "--json", "--jq", ".", "https://example.com/feed"}, "-r and --json"},
 		{"invalid since", []string{"--since", "yesterday", "https://example.com/feed"}, "invalid --since"},
@@ -231,6 +244,7 @@ func TestRunErrors(t *testing.T) {
 		{"missing local file", []string{"feed.xml"}, "open feed"},
 		{"non-HTTP URL", []string{"ftp://example.com/feed"}, "invalid feed URL"},
 		{"credential URL", []string{"http://user:" + "password@example.com/feed"}, "userinfo is not allowed"},
+		{"credential file URL", []string{"file://user:" + "password@localhost/feed.xml"}, "userinfo is not allowed"},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -270,6 +284,19 @@ func TestRunRejectsOversizedFeed(t *testing.T) {
 	t.Cleanup(server.Close)
 	var stdout, stderr bytes.Buffer
 	err := Run(context.Background(), []string{server.URL}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "feed exceeds 32 MiB limit") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRunRejectsOversizedLocalFeed(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "feed.xml")
+	if err := os.WriteFile(path, make([]byte, maxFeedSize+1), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{path}, &stdout, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "feed exceeds 32 MiB limit") {
 		t.Fatalf("error = %v", err)
 	}

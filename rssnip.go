@@ -30,14 +30,14 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (ru
 		fmt.Sprintf("%s (v%s rev:%s)", cmdName, version, revision), flag.ContinueOnError)
 	fs.SetOutput(errStream)
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: %s [options] [--url URL ...] [URL ...]\n\n", cmdName)
+		fmt.Fprintf(fs.Output(), "Usage: %s [options] [--url SOURCE ...] [SOURCE ...]\n\n", cmdName)
 		fmt.Fprintln(fs.Output(), "Options:")
 		fs.PrintDefaults()
 	}
 
 	ver := fs.Bool("version", false, "display version")
 	var urls stringList
-	fs.Var(&urls, "url", "feed URL (repeatable)")
+	fs.Var(&urls, "url", "feed source path or URL (repeatable)")
 	sinceValue := fs.String("since", "", "include items on or after RFC3339 time or YYYY-MM-DD")
 	untilValue := fs.String("until", "", "include items on or before RFC3339 time or YYYY-MM-DD")
 	jqExpression := fs.String("jq", "", "apply a jq expression to each item")
@@ -52,7 +52,7 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (ru
 	urls = append(urls, fs.Args()...)
 	if len(urls) == 0 {
 		fs.Usage()
-		return fmt.Errorf("at least one feed URL is required")
+		return fmt.Errorf("at least one feed source is required")
 	}
 	if *rawOutput && *jqExpression == "" {
 		return fmt.Errorf("-r requires --jq")
