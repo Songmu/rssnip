@@ -96,6 +96,26 @@ func TestRunAcceptsMultipleURLsAndWritesJSONArray(t *testing.T) {
 	}
 }
 
+func TestRunAcceptsURLsFromStdinAndMergesSources(t *testing.T) {
+	t.Parallel()
+	server1 := newFeedServer(t, strings.Replace(testRSS, "Example Feed", "Feed One", 1))
+	server2 := newFeedServer(t, strings.Replace(testRSS, "Example Feed", "Feed Two", 1))
+	var stdout, stderr bytes.Buffer
+	err := run(context.Background(), []string{"--json", "--jq", "._feed.title", server1.URL},
+		strings.NewReader("\n"+server2.URL+"\n"), &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var values []string
+	if err := json.Unmarshal(stdout.Bytes(), &values); err != nil {
+		t.Fatalf("invalid JSON output: %v\n%s", err, stdout.String())
+	}
+	want := []string{"Feed One", "Feed One", "Feed One", "Feed One", "Feed Two", "Feed Two", "Feed Two", "Feed Two"}
+	if !reflect.DeepEqual(values, want) {
+		t.Errorf("values = %#v, want %#v", values, want)
+	}
+}
+
 func TestRunJQZeroAndMultipleValuesInJSONArray(t *testing.T) {
 	t.Parallel()
 	server := newFeedServer(t, testRSS)
