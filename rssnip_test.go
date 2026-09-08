@@ -7,45 +7,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
 
-const testRSS = `<?xml version="1.0"?>
-<rss version="2.0">
-  <channel>
-    <title>Example Feed</title>
-    <link>https://example.com/</link>
-    <item>
-      <guid>before</guid>
-      <title>Before</title>
-      <link>https://example.com/before</link>
-      <pubDate>Sun, 31 Dec 2023 23:59:59 GMT</pubDate>
-    </item>
-    <item>
-      <guid>first</guid>
-      <title>First</title>
-      <link>https://example.com/first</link>
-      <pubDate>Mon, 01 Jan 2024 00:00:00 GMT</pubDate>
-    </item>
-    <item>
-      <guid>second</guid>
-      <title>Second</title>
-      <link>https://example.com/second</link>
-      <pubDate>Wed, 31 Jan 2024 23:59:59 GMT</pubDate>
-    </item>
-    <item>
-      <guid>after</guid>
-      <title>After</title>
-      <link>https://example.com/after</link>
-      <pubDate>Thu, 01 Feb 2024 00:00:00 GMT</pubDate>
-    </item>
-  </channel>
-</rss>`
-
 func TestRunFiltersAndAppliesRawJQ(t *testing.T) {
 	t.Parallel()
-	server := newFeedServer(t, testRSS)
+	server := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
 	var stdout, stderr bytes.Buffer
 	err := Run(context.Background(), []string{
 		"--url", server.URL,
@@ -66,57 +35,66 @@ func TestRunFiltersAndAppliesRawJQ(t *testing.T) {
 	}
 }
 
-func TestRunStreamsJSONLinesBeforeLaterFeedFailure(t *testing.T) {
+func TestRunAcceptsURLsFromStdinAndMergesSources(t *testing.T) {
 	t.Parallel()
-	goodServer := newFeedServer(t, testRSS)
-	badServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "no", http.StatusBadGateway)
-	}))
-	t.Cleanup(badServer.Close)
+	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
+	server1 := newFeedServer(t, strings.Replace(testRSS, "Example Feed", "Feed One", 1))
+	server2 := newFeedServer(t, strings.Replace(testRSS, "Example Feed", "Feed Two", 1))
+	server3 := newFeedServer(t, strings.Replace(testRSS, "Example Feed", "Feed Three", 1))
 	var stdout, stderr bytes.Buffer
-	err := Run(context.Background(), []string{goodServer.URL, badServer.URL}, &stdout, &stderr)
-	if err == nil || !strings.Contains(err.Error(), "502 Bad Gateway") {
-		t.Fatalf("error = %v", err)
+	err := run(context.Background(), []string{
+		"--with-feed",
+		"--jq", "._feed.title", "-r",
+		"--url", server1.URL,
+		"--url", server2.URL,
+		server3.URL,
+	}, strings.NewReader("\n"+server1.URL+"\n"), &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if lines := strings.Count(strings.TrimSpace(stdout.String()), "\n") + 1; lines != 4 {
-		t.Errorf("streamed lines = %d, want 4", lines)
+	values := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	want := []string{
+		"Feed One", "Feed One", "Feed One", "Feed One",
+		"Feed Two", "Feed Two", "Feed Two", "Feed Two",
+		"Feed Three", "Feed Three", "Feed Three", "Feed Three",
+		"Feed One", "Feed One", "Feed One", "Feed One",
+	}
+	if !reflect.DeepEqual(values, want) {
+		t.Errorf("values = %#v, want %#v", values, want)
 	}
 }
 
-func TestRunWritesJSONLinesByDefault(t *testing.T) {
+func TestRunJQFeedMetadataIsOptIn(t *testing.T) {
 	t.Parallel()
-	server := newFeedServer(t, testRSS)
-	var stdout, stderr bytes.Buffer
-	if err := Run(context.Background(), []string{"--with-feed", "--url", server.URL}, &stdout, &stderr); err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
-	if len(lines) != 4 {
-		t.Fatalf("got %d lines, want 4", len(lines))
-	}
-	var item Item
-	if err := json.Unmarshal([]byte(lines[0]), &item); err != nil {
-		t.Fatal(err)
-	}
-	if item.ID != "before" || item.Feed.FeedURL != server.URL {
-		t.Errorf("unexpected item with feed metadata: %#v", item)
-	}
-}
-
-func TestRunOmitsFeedMetadataByDefault(t *testing.T) {
-	t.Parallel()
-	server := newFeedServer(t, testRSS)
-	var stdout, stderr bytes.Buffer
-	if err := Run(context.Background(), []string{"--url", server.URL}, &stdout, &stderr); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(stdout.String(), `"_feed"`) {
-		t.Errorf("default output contains feed metadata: %s", stdout.String())
+	server := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
+	for _, tt := range []struct {
+		name     string
+		withFeed bool
+		want     string
+	}{
+		{name: "omitted by default", want: "false\n"},
+		{name: "included with flag", withFeed: true, want: "true\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var stdout, stderr bytes.Buffer
+			args := []string{"--url", server.URL, "--jq", `if .id == "before" then has("_feed") else empty end`}
+			if tt.withFeed {
+				args = append(args, "--with-feed")
+			}
+			if err := Run(context.Background(), args, &stdout, &stderr); err != nil {
+				t.Fatal(err)
+			}
+			if got := stdout.String(); got != tt.want {
+				t.Errorf("stdout = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
 func TestRunPreservesMultipleFeedOrder(t *testing.T) {
 	t.Parallel()
+	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
 	firstServer := newFeedServer(t, testRSS)
 	secondServer := newFeedServer(t, strings.Replace(testRSS, "<guid>before</guid>", "<guid>other</guid>", 1))
 	var stdout, stderr bytes.Buffer
@@ -144,7 +122,7 @@ func TestRunPreservesMultipleFeedOrder(t *testing.T) {
 
 func TestRunJQCanEmitZeroOrMultipleValues(t *testing.T) {
 	t.Parallel()
-	server := newFeedServer(t, testRSS)
+	server := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
 	var stdout, stderr bytes.Buffer
 	err := Run(context.Background(), []string{
 		"--url", server.URL,
@@ -157,6 +135,40 @@ func TestRunJQCanEmitZeroOrMultipleValues(t *testing.T) {
 	want := "second\nsecond-extra\n"
 	if got := stdout.String(); got != want {
 		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestRunStreamsJSONLinesBeforeLaterFeedFailure(t *testing.T) {
+	t.Parallel()
+	goodServer := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
+	badServer := newBadGatewayServer(t)
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{goodServer.URL, badServer.URL}, &stdout, &stderr)
+	if err == nil || !strings.Contains(err.Error(), "502 Bad Gateway") {
+		t.Fatalf("error = %v", err)
+	}
+	if lines := strings.Count(strings.TrimSpace(stdout.String()), "\n") + 1; lines != 4 {
+		t.Errorf("streamed lines = %d, want 4", lines)
+	}
+}
+
+func TestRunWritesJSONLinesWithoutFeedMetadataByDefault(t *testing.T) {
+	t.Parallel()
+	server := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
+	var stdout, stderr bytes.Buffer
+	if err := Run(context.Background(), []string{"--url", server.URL}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("got %d lines, want 4", len(lines))
+	}
+	var item Item
+	if err := json.Unmarshal([]byte(lines[0]), &item); err != nil {
+		t.Fatal(err)
+	}
+	if item.ID != "before" || item.Feed.FeedURL != "" {
+		t.Errorf("unexpected item: %#v", item)
 	}
 }
 
@@ -195,10 +207,7 @@ func TestRunErrors(t *testing.T) {
 
 func TestRunReportsHTTPError(t *testing.T) {
 	t.Parallel()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "no", http.StatusBadGateway)
-	}))
-	t.Cleanup(server.Close)
+	server := newBadGatewayServer(t)
 	var stdout, stderr bytes.Buffer
 	err := Run(context.Background(), []string{server.URL}, &stdout, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "502 Bad Gateway") {
@@ -222,27 +231,10 @@ func TestRunRejectsOversizedFeed(t *testing.T) {
 
 func TestRunReportsInvalidJQ(t *testing.T) {
 	t.Parallel()
-	server := newFeedServer(t, testRSS)
+	server := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
 	var stdout, stderr bytes.Buffer
 	err := Run(context.Background(), []string{"--jq", "[", server.URL}, &stdout, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "parse --jq expression") {
 		t.Fatalf("error = %v", err)
 	}
-}
-
-func newFeedServer(t *testing.T, body string) *httptest.Server {
-	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("User-Agent"); !strings.HasPrefix(got, "rssnip/") {
-			t.Errorf("User-Agent = %q", got)
-		}
-		accept := r.Header.Get("Accept")
-		if !strings.Contains(accept, "application/json") || !strings.Contains(accept, "*/*") {
-			t.Errorf("Accept = %q", accept)
-		}
-		w.Header().Set("Content-Type", "application/rss+xml")
-		fmt.Fprint(w, body)
-	}))
-	t.Cleanup(server.Close)
-	return server
 }

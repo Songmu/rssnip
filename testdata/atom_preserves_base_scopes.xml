@@ -1,0 +1,11 @@
+<a:feed xmlns:a="http://www.w3.org/2005/Atom">
+  <a:author><a:name>Author</a:name><a:uri>?author=1</a:uri></a:author>
+  <a:entry xml:base="/posts/one.html">
+    <a:id>one</a:id><a:link href="#one"/>
+    <a:content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><a href="?q=1">one</a></div></a:content>
+  </a:entry>
+  <a:entry>
+    <a:id>two</a:id><a:link href="#two"/>
+    <a:content type="html"><![CDATA[<img src="?image=2">]]></a:content>
+  </a:entry>
+</a:feed>
