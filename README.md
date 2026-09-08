@@ -39,6 +39,10 @@ Each item follows the JSON Feed 1.1 item shape. The `_feed` extension records
 the source feed's title, home page URL, and fetched feed URL, which keeps items
 attributable when multiple feeds are read at once.
 
+JSON Feed items use their supplied `id`, falling back to `url`. If both are
+missing, a deterministic SHA-256 identifier is generated from the full decoded
+item; changing that item's content or metadata changes its generated identifier.
+
 By default, every item is emitted as one compact JSON object per line. Use
 `--json` to emit one JSON array instead. Feed URLs may be supplied by repeating
 `--url`, as positional arguments, or by combining both forms; output preserves
@@ -125,6 +129,8 @@ boundaries are inclusive. Date-only values are interpreted in UTC, and a
 date-only `--until` includes the entire day. Items without a parseable
 publication or modification date are omitted when a date filter is active. No
 date filter is applied by default.
+Unparseable JSON Feed timestamps are omitted from normalized output even when
+no date filter is active.
 
 ### jq filtering
 

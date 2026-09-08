@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -111,14 +112,20 @@ func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create request for %q failed", displayURL(feedURL))
+		return nil, fmt.Errorf("create request for %q: %w", displayURL(feedURL), err)
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "application/feed+json, application/json, application/atom+xml, application/rss+xml, application/rdf+xml, application/xml, text/xml, */*;q=0.1")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("fetch %q failed", displayURL(feedURL))
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			redacted := *urlErr
+			redacted.URL = displayURL(redacted.URL)
+			err = &redacted
+		}
+		return nil, fmt.Errorf("fetch %q: %w", displayURL(feedURL), err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -269,6 +276,14 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 	}
 	items := make([]Item, 0, len(feed.Items))
 	for _, source := range feed.Items {
+		id := firstNonEmpty(source.ID, source.URL)
+		if id == "" {
+			var err error
+			id, err = generatedJSONFeedID(source)
+			if err != nil {
+				return nil, false, fmt.Errorf("generate item ID for feed %q: %w", sourceURL, err)
+			}
+		}
 		authors := append([]Author(nil), source.Authors...)
 		if len(authors) == 0 && source.Author != nil {
 			authors = append(authors, *source.Author)
@@ -277,7 +292,7 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 			authors = append(authors, feedAuthors...)
 		}
 		item := Item{
-			ID:            firstNonEmpty(source.ID, source.URL, generatedJSONFeedID(source)),
+			ID:            id,
 			URL:           source.URL,
 			ExternalURL:   source.ExternalURL,
 			Title:         source.Title,
@@ -385,6 +400,11 @@ func withDocumentBase(body []byte, sourceURL string) []byte {
 		return bytes.Join([][]byte{body[:start+valueStart+1], []byte(resolved), body[start+valueEnd:]}, nil)
 	}
 	base := []byte(` xml:base="` + xmlEscape(sourceURL) + `"`)
+	// InputOffset is after '>'; self-closing tags need insertion before '/>'.
+	end--
+	if body[end-1] == '/' {
+		end--
+	}
 	return bytes.Join([][]byte{body[:end], base, body[end:]}, nil)
 }
 
@@ -426,13 +446,13 @@ func displayURL(value string) string {
 	return parsed.String()
 }
 
-func generatedJSONFeedID(item jsonFeedItem) string {
-	return hashID(item.Title, item.DatePublished, item.DateModified, item.Summary)
-}
-
-func hashID(parts ...string) string {
-	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
-	return "urn:sha256:" + hex.EncodeToString(sum[:])
+func generatedJSONFeedID(item jsonFeedItem) (string, error) {
+	data, err := json.Marshal(item)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return "urn:sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
 func firstNonEmpty(values ...string) string {
@@ -464,7 +484,7 @@ func normalizeDate(value string) string {
 	}
 	parsed, err := time.Parse(time.RFC3339Nano, value)
 	if err != nil {
-		return value
+		return ""
 	}
 	return parsed.Format(time.RFC3339Nano)
 }
