@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -60,14 +61,48 @@ func TestRunAcceptsLocalFeedPathAndFileURL(t *testing.T) {
 
 func TestRunAcceptsLocalPathWithInvalidURLSyntax(t *testing.T) {
 	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("colon is not valid in a Windows filename")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "feed%.xml")
 	if err := os.WriteFile(path, mustReadTestdata(t, "sample_rss.xml"), 0600); err != nil {
 		t.Fatal(err)
 	}
+
 	var stdout, stderr bytes.Buffer
 	if err := Run(context.Background(), []string{path}, &stdout, &stderr); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRunNormalizesUppercaseHTTPScheme(t *testing.T) {
+	t.Parallel()
+	server := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
+	var stdout, stderr bytes.Buffer
+	if err := Run(context.Background(), []string{strings.ToUpper(server.URL[:5]) + server.URL[5:]}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunLocalFeedResolvesRelativeURLs(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "feed.xml")
+	if err := os.WriteFile(path, mustReadTestdata(t, "local_relative.xml"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if err := Run(context.Background(), []string{"--with-feed", path}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	var item Item
+	if err := json.Unmarshal([]byte(strings.TrimSpace(stdout.String())), &item); err != nil {
+		t.Fatal(err)
+	}
+	base := fileURLFromLocalPath(path)
+	if item.Feed.FeedURL != base || item.URL != resolveURL(base, "article") ||
+		len(item.Attachments) != 1 || item.Attachments[0].URL != resolveURL(base, "media.mp3") {
+		t.Fatalf("item = %#v, want feed URL %q and relative URLs resolved", item, base)
 	}
 }
 

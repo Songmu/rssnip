@@ -121,7 +121,8 @@ func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item
 	if parsedURL.User != nil {
 		return nil, fmt.Errorf("invalid feed URL %q: userinfo is not allowed", displayURL(feedURL))
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
+	parsedURL.Scheme = strings.ToLower(parsedURL.Scheme)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsedURL.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request for %q: %w", displayURL(feedURL), err)
 	}
@@ -175,22 +176,25 @@ func fetchLocalFeed(ctx context.Context, feedName string, parsedURL *url.URL) ([
 			return nil, fmt.Errorf("invalid feed URL %q: file path is empty", displayURL(feedName))
 		}
 	}
-	info, err := os.Stat(path)
+	file, err := openLocalFeed(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("stat feed %q: %w", feedName, err)
+		}
+		return nil, fmt.Errorf("open feed %q: %w", feedName, err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("stat feed %q: %w", feedName, err)
 	}
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("open feed %q: not a regular file", feedName)
 	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open feed %q: %w", feedName, err)
-	}
-	defer file.Close()
 	if info.Size() > maxFeedSize {
 		return nil, fmt.Errorf("read %q: feed exceeds %d MiB limit", feedName, maxFeedSize>>20)
 	}
-	body, err := io.ReadAll(io.LimitReader(file, maxFeedSize+1))
+	body, err := io.ReadAll(io.LimitReader(contextReader{ctx: ctx, reader: file}, maxFeedSize+1))
 	if err != nil {
 		return nil, fmt.Errorf("read %q: %w", feedName, err)
 	}
@@ -205,6 +209,18 @@ func fetchLocalFeed(ctx context.Context, feedName string, parsedURL *url.URL) ([
 		}
 	}
 	return parseFeed(body, sourceURL)
+}
+
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.reader.Read(p)
 }
 
 func isLocalFeedPath(value string) bool {
