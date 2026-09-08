@@ -40,8 +40,9 @@ the source feed's title, home page URL, and fetched feed URL, which keeps items
 attributable when multiple feeds are read at once.
 
 JSON Feed items use their supplied `id`, falling back to `url`. If both are
-missing, a deterministic SHA-256 identifier is generated from the full decoded
-item; changing that item's content or metadata changes its generated identifier.
+missing, a deterministic SHA-256 identifier is generated from the supported
+item fields before normalization. Unknown fields (including custom extensions)
+are ignored; changing a supported field changes the generated identifier.
 
 By default, every item is emitted as one compact JSON object per line. Use
 `--json` to emit one JSON array instead. Feed URLs may be supplied by repeating
@@ -105,7 +106,7 @@ conforms to this JSON Schema:
         "mime_type": { "type": "string" },
         "title": { "type": "string" },
         "size_in_bytes": { "type": "integer" },
-        "duration_in_seconds": { "type": "integer" }
+        "duration_in_seconds": { "type": "number" }
       }
     },
     "feed": {

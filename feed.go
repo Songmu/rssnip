@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -50,11 +49,11 @@ type Author struct {
 }
 
 type Attachment struct {
-	URL               string `json:"url"`
-	MIMEType          string `json:"mime_type"`
-	Title             string `json:"title,omitempty"`
-	SizeInBytes       int64  `json:"size_in_bytes,omitempty"`
-	DurationInSeconds int64  `json:"duration_in_seconds,omitempty"`
+	URL               string  `json:"url"`
+	MIMEType          string  `json:"mime_type"`
+	Title             string  `json:"title,omitempty"`
+	SizeInBytes       int64   `json:"size_in_bytes,omitempty"`
+	DurationInSeconds float64 `json:"duration_in_seconds,omitempty"`
 }
 
 type FeedInfo struct {
@@ -91,11 +90,11 @@ type jsonFeedItem struct {
 }
 
 type jsonFeedAttachment struct {
-	URL               string `json:"url"`
-	MIMEType          string `json:"mime_type"`
-	Title             string `json:"title"`
-	SizeInBytes       int64  `json:"size_in_bytes"`
-	DurationInSeconds int64  `json:"duration_in_seconds"`
+	URL               string  `json:"url"`
+	MIMEType          string  `json:"mime_type"`
+	Title             string  `json:"title"`
+	SizeInBytes       int64   `json:"size_in_bytes"`
+	DurationInSeconds float64 `json:"duration_in_seconds"`
 }
 
 func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item, error) {
@@ -165,7 +164,11 @@ func parseFeed(body []byte, sourceURL string) ([]Item, error) {
 
 	parser := gofeed.NewParser()
 	parser.KeepOriginalFeed = true
-	feed, err := parser.Parse(bytes.NewReader(withDocumentBase(body, documentBaseURL(sourceURL))))
+	normalized, err := normalizeAtomDocument(body, sourceURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse feed %q: %w", sourceURL, err)
+	}
+	feed, err := parser.Parse(bytes.NewReader(normalized))
 	if err != nil {
 		return nil, fmt.Errorf("parse feed %q: %w", sourceURL, err)
 	}
@@ -341,11 +344,18 @@ func atomContent(entry *atom.Entry) (html, text string) {
 	if err != nil {
 		contentType = entry.Content.Type
 	}
+	if isHTMLContentType(contentType) {
+		return entry.Content.Value, ""
+	}
+	return "", entry.Content.Value
+}
+
+func isHTMLContentType(contentType string) bool {
 	switch strings.ToLower(contentType) {
 	case "html", "xhtml", "text/html", "application/xhtml+xml":
-		return entry.Content.Value, ""
+		return true
 	default:
-		return "", entry.Content.Value
+		return false
 	}
 }
 
@@ -358,68 +368,6 @@ func atomAuthors(base string, people []*atom.Person) []Author {
 		authors = append(authors, Author{Name: person.Name, URL: resolveURL(base, person.URI)})
 	}
 	return authors
-}
-
-func withDocumentBase(body []byte, sourceURL string) []byte {
-	decoder := xml.NewDecoder(bytes.NewReader(body))
-	var start, end int
-	for {
-		token, err := decoder.Token()
-		if err != nil {
-			return body
-		}
-		element, ok := token.(xml.StartElement)
-		if !ok || element.Name.Local != "feed" ||
-			element.Name.Space != "http://www.w3.org/2005/Atom" {
-			continue
-		}
-		end = int(decoder.InputOffset())
-		start = bytes.LastIndex(body[:end], []byte("<"))
-		if start < 0 {
-			return body
-		}
-		break
-	}
-	tag := body[start:end]
-	const baseAttribute = "xml:base="
-	if index := bytes.Index(bytes.ToLower(tag), []byte(baseAttribute)); index >= 0 {
-		valueStart := index + len(baseAttribute)
-		for valueStart < len(tag) && (tag[valueStart] == ' ' || tag[valueStart] == '\t') {
-			valueStart++
-		}
-		if valueStart >= len(tag) || (tag[valueStart] != '"' && tag[valueStart] != '\'') {
-			return body
-		}
-		quote := tag[valueStart]
-		valueEnd := bytes.IndexByte(tag[valueStart+1:], quote)
-		if valueEnd < 0 {
-			return body
-		}
-		valueEnd += valueStart + 1
-		resolved := xmlEscape(resolveURL(sourceURL, string(tag[valueStart+1:valueEnd])))
-		return bytes.Join([][]byte{body[:start+valueStart+1], []byte(resolved), body[start+valueEnd:]}, nil)
-	}
-	base := []byte(` xml:base="` + xmlEscape(sourceURL) + `"`)
-	// InputOffset is after '>'; self-closing tags need insertion before '/>'.
-	end--
-	if body[end-1] == '/' {
-		end--
-	}
-	return bytes.Join([][]byte{body[:end], base, body[end:]}, nil)
-}
-
-func documentBaseURL(value string) string {
-	parsed, err := url.Parse(value)
-	if err != nil {
-		return value
-	}
-	return parsed.ResolveReference(&url.URL{Path: "."}).String()
-}
-
-func xmlEscape(value string) string {
-	var escaped bytes.Buffer
-	_ = xml.EscapeText(&escaped, []byte(value))
-	return escaped.String()
 }
 
 func resolveURL(base, value string) string {

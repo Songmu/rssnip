@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-func TestDocumentBaseIsAnAttribute(t *testing.T) {
+func TestAtomNormalizationDoesNotInjectCharacterData(t *testing.T) {
 	t.Parallel()
 	for _, body := range []string{
 		`<feed xmlns="http://www.w3.org/2005/Atom"></feed>`,
@@ -24,13 +24,134 @@ func TestDocumentBaseIsAnAttribute(t *testing.T) {
 			Text string `xml:",chardata"`
 		}
 		const base = "https://example.com/feeds/?a=1&b=2"
-		result := withDocumentBase([]byte(body), base)
+		result, err := normalizeAtomDocument([]byte(body), base)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if err := xml.Unmarshal(result, &root); err != nil {
 			t.Fatalf("invalid XML %q: %v", result, err)
 		}
-		if root.Base != base || root.Text != "" {
-			t.Errorf("document base must be an attribute, got %#v in %s", root, result)
+		if root.Base != "" || root.Text != "" {
+			t.Errorf("consumed base must not remain as attribute or text, got %#v in %s", root, result)
 		}
+	}
+}
+
+func TestAtomReferenceResolution(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, rootAttributes, entryAttributes, reference, want string
+	}{
+		{"query", "", "", "?page=2", "https://example.com/feeds/main.xml?page=2"},
+		{"fragment", "", "", "#part", "https://example.com/feeds/main.xml?token=x#part"},
+		{"relative", "", "", "article", "https://example.com/feeds/article"},
+		{"file base", `xml:base="/posts/index.html?view=all"`, "", "#part", "https://example.com/posts/index.html?view=all#part"},
+		{"spaced base", `xml:base = "/root/"`, "", "article", "https://example.com/root/article"},
+		{"base in other attribute", `label="xml:base='/wrong/'"`, "", "article", "https://example.com/feeds/article"},
+		{"escaped base", `xml:base="/root/?a=1&amp;b=2"`, "", "#part", "https://example.com/root/?a=1&b=2#part"},
+		{"nested file base", `xml:base="/root/"`, `xml:base="entries/index.xml"`, "?page=2", "https://example.com/root/entries/index.xml?page=2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := `<feed xmlns="http://www.w3.org/2005/Atom" ` + tt.rootAttributes + `>
+			  <entry ` + tt.entryAttributes + `><id>entry</id>
+			    <link href="` + tt.reference + `"/>
+			    <content type="html">&lt;a href="` + tt.reference + `"&gt;link&lt;/a&gt;</content>
+			  </entry></feed>`
+			items, err := parseFeed([]byte(body), "https://example.com/feeds/main.xml?token=x#old")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(items) != 1 {
+				t.Fatalf("items = %#v", items)
+			}
+			if items[0].URL != tt.want {
+				t.Errorf("URL = %q, want %q", items[0].URL, tt.want)
+			}
+			// HTML serialization escapes query separators.
+			wantHTML := strings.ReplaceAll(tt.want, "&", "&amp;")
+			if !strings.Contains(items[0].ContentHTML, `href="`+wantHTML+`"`) {
+				t.Errorf("content = %q, want href %q", items[0].ContentHTML, tt.want)
+			}
+		})
+	}
+}
+
+func TestAtomNormalizationPreservesContentAndBaseScopes(t *testing.T) {
+	t.Parallel()
+	body := []byte(`<a:feed xmlns:a="http://www.w3.org/2005/Atom">
+	  <a:author><a:name>Author</a:name><a:uri>?author=1</a:uri></a:author>
+	  <a:entry xml:base="/posts/one.html">
+	    <a:id>one</a:id><a:link href="#one"/>
+	    <a:content type="xhtml"><div xmlns="http://www.w3.org/1999/xhtml"><a href="?q=1">one</a></div></a:content>
+	  </a:entry>
+	  <a:entry>
+	    <a:id>two</a:id><a:link href="#two"/>
+	    <a:content type="html"><![CDATA[<img src="?image=2">]]></a:content>
+	  </a:entry>
+	</a:feed>`)
+	items, err := parseFeed(body, "https://example.com/feed.xml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("items = %#v", items)
+	}
+	if items[0].URL != "https://example.com/posts/one.html#one" ||
+		items[1].URL != "https://example.com/feed.xml#two" {
+		t.Errorf("base scopes were not preserved: %#v", items)
+	}
+	for i, want := range []string{
+		`href="https://example.com/posts/one.html?q=1"`,
+		`src="https://example.com/feed.xml?image=2"`,
+	} {
+		if !strings.Contains(items[i].ContentHTML, want) {
+			t.Errorf("items[%d].ContentHTML = %q, want %q", i, items[i].ContentHTML, want)
+		}
+		if len(items[i].Authors) != 1 || items[i].Authors[0].URL != "https://example.com/feed.xml?author=1" {
+			t.Errorf("items[%d].Authors = %#v", i, items[i].Authors)
+		}
+	}
+}
+
+func TestAtomNormalizationHandlesSourceEncoding(t *testing.T) {
+	t.Parallel()
+	body := []byte("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>" +
+		`<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>one</id><title>Caf` +
+		"\xe9" + `</title><content type="text">text</content></entry></feed>`)
+	items, err := parseFeed(body, "https://example.com/feed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Title != "Caf\u00e9" {
+		t.Errorf("items = %#v", items)
+	}
+}
+
+func TestJSONFeedFractionalAttachmentDuration(t *testing.T) {
+	t.Parallel()
+	body := []byte(`{"version":"https://jsonfeed.org/version/1.1","items":[
+	  {"id":"episode","attachments":[
+	    {"url":"https://example.com/audio","mime_type":"audio/mpeg","duration_in_seconds":1.5},
+	    {"url":"https://example.com/other","mime_type":"audio/mpeg","duration_in_seconds":-0.5}
+	  ]}
+	]}`)
+	items, err := parseFeed(body, "https://example.com/feed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || len(items[0].Attachments) != 2 {
+		t.Fatalf("items = %#v", items)
+	}
+	if items[0].Attachments[0].DurationInSeconds != 1.5 || items[0].Attachments[1].DurationInSeconds != 0 {
+		t.Errorf("attachments = %#v", items[0].Attachments)
+	}
+	var output strings.Builder
+	if err := writeItems(&output, items, ".", false, true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), `"duration_in_seconds":1.5`) {
+		t.Errorf("fractional duration lost in jq output: %s", output.String())
 	}
 }
 
