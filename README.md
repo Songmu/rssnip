@@ -30,6 +30,8 @@ https://example.com/article
 
 % rssnip --with-feed --url https://example.com/feed.xml
 {"id":"...","url":"https://example.com/article","title":"Example","_feed":{"title":"Example Feed","feed_url":"https://example.com/feed.xml"}}
+
+% rssnip --max-pages 3 --url https://example.com/feed.xml
 ```
 
 ## Description
@@ -40,6 +42,7 @@ https://example.com/article
 - Atom 1.0
 - RDF/RSS 1.0
 - JSON Feed 1.0 and 1.1
+- Atom/RSS `rel="next"` and JSON Feed `next_url` pagination
 
 Each item follows the JSON Feed 1.1 item shape. By default, items do not
 include feed-level metadata. The `--with-feed` option adds the `_feed`
@@ -55,6 +58,15 @@ Every item is emitted as one compact JSON object per line. Feed URLs may be
 supplied by repeating `--url`, as positional arguments, one per line on
 standard input, or by combining any of these forms; output preserves feed and
 item order.
+
+### Pagination
+
+When a feed provides a standard next-page link, rssnip follows it and emits
+pages in order. It supports Atom link relations (including Atom links embedded
+in RSS) and JSON Feed `next_url`. It fetches at most 10 pages per supplied
+feed URL by default; use `--max-pages` to choose another positive limit.
+Repeated page URLs stop pagination, and duplicate item IDs across pages are
+emitted once.
 
 ### Output schema
 
@@ -153,9 +165,9 @@ https://example.com/go-article
 
 ### Initial scope
 
-The initial release fetches explicit feed URLs. HTML feed discovery, feed
-pagination, conditional requests, persistent caching, and natural-language
-date expressions are intentionally outside its scope.
+The initial release fetches explicit feed URLs. HTML feed discovery,
+conditional requests, persistent caching, and natural-language date
+expressions are intentionally outside its scope.
 
 ## Installation
 

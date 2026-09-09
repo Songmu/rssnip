@@ -78,3 +78,92 @@ func TestFetchFeedRedactsRedirectErrors(t *testing.T) {
 		t.Errorf("error exposes redirect credentials: %v", err)
 	}
 }
+
+func TestFetchFeedPagesFollowsAtomAndJSONFeedPagination(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		pages map[string]string
+	}{
+		{
+			name: "Atom link relation",
+			pages: map[string]string{
+				"/atom/one": `<feed xmlns="http://www.w3.org/2005/Atom"><link rel="next" href="two"/><entry><id>one</id><title>One</title></entry></feed>`,
+				"/atom/two": `<feed xmlns="http://www.w3.org/2005/Atom"><entry><id>two</id><title>Two</title></entry></feed>`,
+			},
+		},
+		{
+			name: "RSS Atom link relation",
+			pages: map[string]string{
+				"/rss/one": `<rss xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>Feed</title><atom:link rel="next" href="two"/><item><guid>one</guid><title>One</title></item></channel></rss>`,
+				"/rss/two": `<rss><channel><title>Feed</title><item><guid>two</guid><title>Two</title></item></channel></rss>`,
+			},
+		},
+		{
+			name: "JSON Feed next URL",
+			pages: map[string]string{
+				"/json/one": `{"version":"https://jsonfeed.org/version/1.1","next_url":"two","items":[{"id":"one","title":"One"}]}`,
+				"/json/two": `{"version":"https://jsonfeed.org/version/1.1","items":[{"id":"two","title":"Two"}]}`,
+			},
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, ok := tt.pages[r.URL.Path]
+				if !ok {
+					http.NotFound(w, r)
+					return
+				}
+				w.Write([]byte(body))
+			}))
+			t.Cleanup(server.Close)
+			var firstPath string
+			for path := range tt.pages {
+				if strings.HasSuffix(path, "/one") {
+					firstPath = path
+				}
+			}
+			items, err := fetchFeedPages(context.Background(), server.Client(), server.URL+firstPath, 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(items) != 2 || items[0].ID != "one" || items[1].ID != "two" {
+				t.Fatalf("items = %#v", items)
+			}
+			if items[1].Feed.FeedURL != server.URL+strings.TrimSuffix(firstPath, "one")+"two" {
+				t.Errorf("second feed URL = %q", items[1].Feed.FeedURL)
+			}
+		})
+	}
+}
+
+func TestFetchFeedPagesBoundsAndDeduplicates(t *testing.T) {
+	t.Parallel()
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		switch r.URL.Path {
+		case "/one":
+			w.Write([]byte(`{"version":"https://jsonfeed.org/version/1.1","next_url":"/two","items":[{"id":"one"},{"id":"duplicate"}]}`))
+		case "/two":
+			w.Write([]byte(`{"version":"https://jsonfeed.org/version/1.1","next_url":"/one","items":[{"id":"duplicate"},{"id":"two"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	items, err := fetchFeedPages(context.Background(), server.Client(), server.URL+"/one", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 {
+		t.Errorf("requests = %d, want 2", requests)
+	}
+	if len(items) != 3 || items[0].ID != "one" || items[1].ID != "duplicate" || items[2].ID != "two" {
+		t.Errorf("items = %#v", items)
+	}
+}

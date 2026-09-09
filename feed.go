@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -18,10 +19,12 @@ import (
 
 	"github.com/mmcdole/gofeed"
 	"github.com/mmcdole/gofeed/atom"
+	"golang.org/x/net/html/charset"
 )
 
 const userAgent = "rssnip/" + version
 const maxFeedSize = 32 << 20
+const defaultMaxPages = 10
 
 // Item is a feed entry normalized to the JSON Feed 1.1 item shape.
 type Item struct {
@@ -69,6 +72,7 @@ type jsonFeed struct {
 	Authors     []Author       `json:"authors"`
 	Author      *Author        `json:"author"`
 	Items       []jsonFeedItem `json:"items"`
+	NextURL     string         `json:"next_url"`
 }
 
 type jsonFeedItem struct {
@@ -98,20 +102,53 @@ type jsonFeedAttachment struct {
 }
 
 func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item, error) {
+	return fetchFeedPages(ctx, client, feedURL, defaultMaxPages)
+}
+
+func fetchFeedPages(ctx context.Context, client *http.Client, feedURL string, maxPages int) ([]Item, error) {
+	items := make([]Item, 0)
+	seenItems := make(map[string]struct{})
+	seenURLs := make(map[string]struct{})
+	nextURL := feedURL
+	for page := 0; page < maxPages && nextURL != ""; page++ {
+		nextURL = paginationURL(nextURL)
+		if _, ok := seenURLs[nextURL]; ok {
+			break
+		}
+		seenURLs[nextURL] = struct{}{}
+
+		pageItems, sourceURL, followingURL, err := fetchFeedPage(ctx, client, nextURL)
+		if err != nil {
+			return nil, err
+		}
+		seenURLs[paginationURL(sourceURL)] = struct{}{}
+		for _, item := range pageItems {
+			if _, ok := seenItems[item.ID]; ok {
+				continue
+			}
+			seenItems[item.ID] = struct{}{}
+			items = append(items, item)
+		}
+		nextURL = followingURL
+	}
+	return items, nil
+}
+
+func fetchFeedPage(ctx context.Context, client *http.Client, feedURL string) ([]Item, string, string, error) {
 	parsedURL, err := url.ParseRequestURI(feedURL)
 	if err != nil || parsedURL.Host == "" ||
 		(parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
 		if err == nil {
 			err = fmt.Errorf("must be an absolute HTTP or HTTPS URL")
 		}
-		return nil, fmt.Errorf("invalid feed URL %q: %w", displayURL(feedURL), err)
+		return nil, "", "", fmt.Errorf("invalid feed URL %q: %w", displayURL(feedURL), err)
 	}
 	if parsedURL.User != nil {
-		return nil, fmt.Errorf("invalid feed URL %q: userinfo is not allowed", displayURL(feedURL))
+		return nil, "", "", fmt.Errorf("invalid feed URL %q: userinfo is not allowed", displayURL(feedURL))
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create request for %q: %w", displayURL(feedURL), err)
+		return nil, "", "", fmt.Errorf("create request for %q: %w", displayURL(feedURL), err)
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "application/feed+json, application/json, application/atom+xml, application/rss+xml, application/rdf+xml, application/xml, text/xml, */*;q=0.1")
@@ -124,29 +161,34 @@ func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item
 			redacted.URL = displayURL(redacted.URL)
 			err = &redacted
 		}
-		return nil, fmt.Errorf("fetch %q: %w", displayURL(feedURL), err)
+		return nil, "", "", fmt.Errorf("fetch %q: %w", displayURL(feedURL), err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-		return nil, fmt.Errorf("fetch %q: unexpected HTTP status %s", displayURL(feedURL), resp.Status)
+		return nil, "", "", fmt.Errorf("fetch %q: unexpected HTTP status %s", displayURL(feedURL), resp.Status)
 	}
 	if resp.ContentLength > maxFeedSize {
-		return nil, fmt.Errorf("read %q: feed exceeds %d MiB limit", displayURL(feedURL), maxFeedSize>>20)
+		return nil, "", "", fmt.Errorf("read %q: feed exceeds %d MiB limit", displayURL(feedURL), maxFeedSize>>20)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxFeedSize+1))
 	if err != nil {
-		return nil, fmt.Errorf("read %q: %w", displayURL(feedURL), err)
+		return nil, "", "", fmt.Errorf("read %q: %w", displayURL(feedURL), err)
 	}
 	if len(body) > maxFeedSize {
-		return nil, fmt.Errorf("read %q: feed exceeds %d MiB limit", displayURL(feedURL), maxFeedSize>>20)
+		return nil, "", "", fmt.Errorf("read %q: feed exceeds %d MiB limit", displayURL(feedURL), maxFeedSize>>20)
 	}
 	sourceURL := feedURL
 	if resp.Request != nil && resp.Request.URL != nil {
 		sourceURL = resp.Request.URL.String()
 	}
 	sourceURL = displayURL(sourceURL)
-	return parseFeed(body, sourceURL)
+	items, err := parseFeed(body, sourceURL)
+	if err != nil {
+		return nil, "", "", err
+	}
+	nextURL, _ := nextPageURL(body, sourceURL)
+	return items, sourceURL, nextURL, nil
 }
 
 func parseFeed(body []byte, sourceURL string) ([]Item, error) {
@@ -318,6 +360,83 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 		items = append(items, item)
 	}
 	return items, true, nil
+}
+
+func nextPageURL(body []byte, sourceURL string) (string, error) {
+	if looksLikeJSON(body) {
+		var feed struct {
+			NextURL string `json:"next_url"`
+		}
+		if err := json.Unmarshal(body, &feed); err != nil {
+			return "", err
+		}
+		return paginationURL(resolveURL(sourceURL, feed.NextURL)), nil
+	}
+
+	decoder := xml.NewDecoder(bytes.NewReader(body))
+	decoder.CharsetReader = charset.NewReaderLabel
+	var bases []string
+	entryDepth := 0
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return "", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		switch element := token.(type) {
+		case xml.StartElement:
+			base := sourceURL
+			if len(bases) > 0 {
+				base = bases[len(bases)-1]
+			}
+			for _, attribute := range element.Attr {
+				if isXMLBase(attribute) {
+					base = resolveURL(base, attribute.Value)
+				}
+			}
+			bases = append(bases, base)
+			if element.Name.Local == "entry" || element.Name.Local == "item" {
+				entryDepth++
+			}
+			if entryDepth != 0 || element.Name.Local != "link" {
+				continue
+			}
+			var href string
+			isNext := false
+			for _, attribute := range element.Attr {
+				switch strings.ToLower(attribute.Name.Local) {
+				case "href":
+					href = attribute.Value
+				case "rel":
+					for _, value := range strings.Fields(attribute.Value) {
+						if strings.EqualFold(value, "next") {
+							isNext = true
+							break
+						}
+					}
+				}
+			}
+			if isNext && href != "" {
+				return paginationURL(resolveURL(base, href)), nil
+			}
+		case xml.EndElement:
+			if element.Name.Local == "entry" || element.Name.Local == "item" {
+				entryDepth--
+			}
+			bases = bases[:len(bases)-1]
+		}
+	}
+}
+
+func paginationURL(value string) string {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return value
+	}
+	parsed.Fragment, parsed.RawFragment = "", ""
+	return parsed.String()
 }
 
 func normalizeAttachment(attachment Attachment) (Attachment, bool) {
