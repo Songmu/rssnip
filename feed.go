@@ -223,6 +223,9 @@ func isLocalFeedPath(value string) bool {
 	if isWindowsAbsolutePath(value) {
 		return true
 	}
+	if filepath.IsAbs(value) {
+		return true
+	}
 	if strings.HasPrefix(value, "://") {
 		return false
 	}

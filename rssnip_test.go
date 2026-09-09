@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -109,6 +110,13 @@ func TestRunAcceptsLocalPathWithDigitLeadingScheme(t *testing.T) {
 	t.Parallel()
 	if !isLocalFeedPath("1:feed.xml") {
 		t.Fatal("digit-leading filename was not classified as local")
+	}
+}
+
+func TestRunTreatsDoubleSlashAbsolutePathAsLocal(t *testing.T) {
+	t.Parallel()
+	if !isLocalFeedPath("//server/share/feed.xml") {
+		t.Fatal("double-slash absolute path was not classified as local")
 	}
 }
 
@@ -332,6 +340,24 @@ func TestRunRejectsOversizedLocalFeed(t *testing.T) {
 	err := Run(context.Background(), []string{path}, &stdout, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "feed exceeds 32 MiB limit") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRunPreservesCanceledLocalFetch(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "feed.xml")
+	if err := os.WriteFile(path, mustReadTestdata(t, "sample_rss.xml"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var stdout, stderr bytes.Buffer
+	err := Run(ctx, []string{path}, &stdout, &stderr)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want wrapped context.Canceled", err)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("unexpected output: %q", stdout.String())
 	}
 }
 
