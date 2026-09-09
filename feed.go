@@ -218,19 +218,18 @@ func fetchFeedDocument(ctx context.Context, client *http.Client, feedURL string)
 
 // discoverFeedURL scans an HTML document for a feed link, without building a
 // full DOM, to bound both memory and stack usage for adversarial input. It
-// decodes the document using the charset declared by the HTTP Content-Type
-// header or HTML metadata before scanning for <base> and <link> elements.
+// decodes HTML metadata or XHTML XML encoding before scanning elements.
 func discoverFeedURL(body []byte, sourceURL, contentType string) (string, bool) {
 	if !looksLikeHTML(body, contentType) {
 		return "", false
 	}
-	reader, err := charset.NewReader(bytes.NewReader(body), contentType)
+	reader, err := discoveryReader(body, contentType)
 	if err != nil {
 		return "", false
 	}
 	tokenizer := html.NewTokenizer(reader)
 	baseURL := discoveryBaseURL(tokenizer, sourceURL)
-	reader, err = charset.NewReader(bytes.NewReader(body), contentType)
+	reader, err = discoveryReader(body, contentType)
 	if err != nil {
 		return "", false
 	}
@@ -266,6 +265,35 @@ func discoverFeedURL(body []byte, sourceURL, contentType string) (string, bool) 
 	}
 }
 
+func discoveryReader(body []byte, contentType string) (io.Reader, error) {
+	mediaType, params, _ := mime.ParseMediaType(contentType)
+	if mediaType != "application/xhtml+xml" {
+		return charset.NewReader(bytes.NewReader(body), contentType)
+	}
+	// XML gives a BOM precedence over HTTP charset and the XML declaration.
+	for _, bom := range [][]byte{{0xef, 0xbb, 0xbf}, {0xff, 0xfe}, {0xfe, 0xff}} {
+		if bytes.HasPrefix(body, bom) {
+			encoding, _, _ := charset.DetermineEncoding(body, "")
+			return encoding.NewDecoder().Reader(bytes.NewReader(body)), nil
+		}
+	}
+	if label := params["charset"]; label != "" {
+		return charset.NewReaderLabel(label, bytes.NewReader(body))
+	}
+	label := "utf-8"
+	if bytes.HasPrefix(body, []byte("<?xml")) {
+		decoder := xml.NewDecoder(bytes.NewReader(body))
+		decoder.CharsetReader = func(name string, input io.Reader) (io.Reader, error) {
+			label = name
+			return charset.NewReaderLabel(name, input)
+		}
+		if _, err := decoder.Token(); err != nil {
+			return nil, err
+		}
+	}
+	return charset.NewReaderLabel(label, bytes.NewReader(body))
+}
+
 // A document's base applies even to links that precede the base element.
 func discoveryBaseURL(tokenizer *html.Tokenizer, sourceURL string) string {
 	pageURL, err := url.Parse(sourceURL)
@@ -281,11 +309,11 @@ func discoveryBaseURL(tokenizer *html.Tokenizer, sourceURL string) string {
 		if token.DataAtom != htmlatom.Base {
 			continue
 		}
-		href := strings.TrimSpace(tokenAttr(token, "href"))
-		if href == "" {
+		href, present := tokenAttrValue(token, "href")
+		if !present {
 			continue
 		}
-		reference, err := url.Parse(href)
+		reference, err := url.Parse(strings.TrimSpace(href))
 		if err != nil {
 			continue
 		}
@@ -344,12 +372,17 @@ func discoveryFetchURL(value string) string {
 }
 
 func tokenAttr(token html.Token, name string) string {
+	value, _ := tokenAttrValue(token, name)
+	return value
+}
+
+func tokenAttrValue(token html.Token, name string) (string, bool) {
 	for _, attr := range token.Attr {
 		if attr.Key == name {
-			return attr.Val
+			return attr.Val, true
 		}
 	}
-	return ""
+	return "", false
 }
 
 func looksLikeHTML(body []byte, contentType string) bool {

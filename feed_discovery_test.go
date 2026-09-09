@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf16"
 )
 
 func TestRunDiscoverySkipsNonFeedAlternates(t *testing.T) {
@@ -118,6 +119,60 @@ func TestDiscoveryUsesBaseAfterLink(t *testing.T) {
 		}
 	}
 
+}
+
+func TestDiscoveryEmptyBaseTakesPrecedence(t *testing.T) {
+	t.Parallel()
+	for _, first := range []string{`href=""`, `href="   "`, `href`} {
+		body := []byte(`<html><base target="_blank"><base ` + first + `>
+		  <base href="/assets/"><link rel="feed" href="feed.xml"></html>`)
+		got, ok := discoverFeedURL(body, "https://example.com/blog/index.html", "text/html")
+		if !ok || got != "https://example.com/blog/feed.xml" {
+			t.Errorf("base %s: discovery = %q, %v", first, got, ok)
+		}
+	}
+}
+
+func TestDiscoveryXHTMLEncoding(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name, prefix, meta, path, contentType string
+	}{
+		{"default UTF-8", "", "", "/caf\xc3\xa9.xml", "application/xhtml+xml"},
+		{"ignore HTML meta", "", `<meta charset="windows-1252" />`, "/caf\xc3\xa9.xml", "application/xhtml+xml"},
+		{"XML declaration", `<?xml version="1.0" encoding="iso-8859-1"?>`, `<meta charset="utf-8" />`, "/caf\xe9.xml", "application/xhtml+xml"},
+		{"XML declaration whitespace", "<?xml\tversion=\"1.0\" encoding=\"iso-8859-1\"?>", `<meta charset="utf-8" />`, "/caf\xe9.xml", "application/xhtml+xml"},
+		{"HTTP charset", "", "", "/caf\xe9.xml", "application/xhtml+xml; charset=iso-8859-1"},
+		{"HTTP overrides declaration", `<?xml version="1.0" encoding="iso-8859-1"?>`, "", "/caf\xc3\xa9.xml", "application/xhtml+xml; charset=utf-8"},
+		{"BOM overrides HTTP", "\xef\xbb\xbf", "", "/caf\xc3\xa9.xml", "application/xhtml+xml; charset=iso-8859-1"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(tt.prefix + `<html xmlns="http://www.w3.org/1999/xhtml"><head>` + tt.meta +
+				"<!--" + strings.Repeat(" ", 2048) + "-->" +
+				`<link rel="feed" href="` + tt.path + `" /></head></html>`)
+			got, ok := discoverFeedURL(body, "https://example.com/blog/", tt.contentType)
+			if !ok || got != "https://example.com/caf%C3%A9.xml" {
+				t.Errorf("discovery = %q, %v", got, ok)
+			}
+		})
+	}
+	for _, littleEndian := range []bool{false, true} {
+		body := []byte{0xfe, 0xff}
+		if littleEndian {
+			body = []byte{0xff, 0xfe}
+		}
+		for _, value := range utf16.Encode([]rune(`<html xmlns="http://www.w3.org/1999/xhtml"><head><link rel="feed" href="/caf` + "\u00e9" + `.xml" /></head></html>`)) {
+			pair := []byte{byte(value >> 8), byte(value)}
+			if littleEndian {
+				pair[0], pair[1] = pair[1], pair[0]
+			}
+			body = append(body, pair...)
+		}
+		got, ok := discoverFeedURL(body, "https://example.com/blog/", "application/xhtml+xml; charset=iso-8859-1")
+		if !ok || got != "https://example.com/caf%C3%A9.xml" {
+			t.Errorf("UTF-16 little-endian=%v: discovery = %q, %v", littleEndian, got, ok)
+		}
+	}
 }
 
 func TestDiscoveryRecognizesLeadingHTMLComments(t *testing.T) {
