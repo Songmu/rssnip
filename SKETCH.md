@@ -10,7 +10,7 @@
     - 以下の出力形式は仮
 
 ```sh
-$ rssnip --since 2024-01-01 --until 2024-01-31 --url https://example.com/rss.xml
+$ rssnip --since 2024-01-01 --until 2024-01-31 https://example.com/rss.xml
 {"title": "Example Title 1", "link": "https://example.com/article1", "pubDate": "2024-01-05"}
 {"title": "Example Title 2", "link": "https://example.com/article2", "pubDate": "2024-01-15"}
 
@@ -19,7 +19,7 @@ $ rssnip --since 2024-01-01 --until 2024-01-31 --url https://example.com/rss.xml
 ## --jq オプション
 
 ```sh
-$ rssnip --since 2024-01-01 --until 2024-01-31 --url https://example.com/rss.xml -r --jq '.link'
+$ rssnip --since 2024-01-01 --until 2024-01-31 -r --jq '.link' https://example.com/rss.xml
 https://example.com/article1
 https://example.com/article2
 ```

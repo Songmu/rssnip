@@ -19,19 +19,23 @@ for pipelines, crawlers, and further processing with tools such as `jq`.
 
 ```console
 % rssnip --since 2024-01-01 --until 2024-01-31 \
-    --url https://example.com/feed.xml
+    https://example.com/feed.xml
 {"id":"...","url":"https://example.com/article","title":"Example","date_published":"2024-01-15T00:00:00Z"}
 
-% rssnip --url https://example.com/feed.xml --jq '.url' -r
+% rssnip --jq '.url' -r https://example.com/feed.xml
 https://example.com/article
 
 % printf '%s\n' https://example.com/feed.xml | rssnip
 {"id":"...","url":"https://example.com/article",...}
 
-% rssnip --with-feed --url https://example.com/feed.xml
+% rssnip --with-feed https://example.com/feed.xml
 {"id":"...","url":"https://example.com/article","title":"Example","_feed":{"title":"Example Feed","feed_url":"https://example.com/feed.xml"}}
 
-% rssnip --max-pages 3 --url https://example.com/feed.xml
+% rssnip --max-pages 3 https://example.com/feed.xml
+
+% rssnip https://example.com/feed.xml https://example.org/feed.xml
+
+% printf '%s\n' https://example.org/feed.xml | rssnip https://example.com/feed.xml
 ```
 
 ## Description
@@ -55,9 +59,11 @@ item fields before normalization. Unknown fields (including custom extensions)
 are ignored; changing a supported field changes the generated identifier.
 
 Every item is emitted as one compact JSON object per line. Feed or blog/site
-URLs may be supplied by repeating `--url`, as positional arguments, one per
-line on standard input, or by combining any of these forms; output preserves feed and
-item order. When a URL returns an HTML page instead of a feed, `rssnip` scans
+URLs may be supplied as positional arguments, one per line on standard input,
+or by combining both forms. Positional URLs are processed first, followed by
+standard input URLs; duplicate input URLs are preserved, and output preserves
+feed and item order. Place all options before the first URL.
+When a URL returns an HTML page instead of a feed, `rssnip` scans
 `<link>` elements with `rel="alternate"` or `rel="feed"`. It selects the first
 eligible feed candidate in document order and fetches that single feed, not
 every linked feed. A `rel="alternate"` link qualifies through its media type,
@@ -228,8 +234,8 @@ expression may emit zero, one, or multiple results. `-r` writes string results
 without JSON quoting and requires `--jq`.
 
 ```console
-% rssnip --url https://example.com/feed.xml \
-    --jq 'select(.tags | index("go")) | .url' -r
+% rssnip --jq 'select(.tags | index("go")) | .url' -r \
+    https://example.com/feed.xml
 https://example.com/go-article
 ```
 
