@@ -20,7 +20,12 @@ func discoveryFetchURL(value string) string {
 		return value
 	}
 	parsed.Fragment, parsed.RawFragment = "", ""
-	parsed.Host = strings.ToLower(parsed.Host)
+	if zone := strings.IndexByte(parsed.Host, '%'); strings.HasPrefix(parsed.Host, "[") && zone >= 0 {
+		// IPv6 zone identifiers are not DNS names; preserve their spelling.
+		parsed.Host = strings.ToLower(parsed.Host[:zone]) + parsed.Host[zone:]
+	} else {
+		parsed.Host = strings.ToLower(parsed.Host)
+	}
 	if (parsed.Scheme == "http" && parsed.Port() == "80") ||
 		(parsed.Scheme == "https" && parsed.Port() == "443") {
 		host := parsed.Hostname()

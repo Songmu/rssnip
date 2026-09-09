@@ -15,8 +15,14 @@ import (
 // MaxDocumentSize is the maximum document size in bytes before decoding.
 const MaxDocumentSize int64 = 32 << 20
 
+// MaxNestingDepth bounds tracked HTML namespace/template frames and XML elements.
+const MaxNestingDepth = 512
+
 // ErrTooLarge indicates that a document exceeds MaxDocumentSize.
 var ErrTooLarge = errors.New("feediscovery: document exceeds size limit")
+
+// ErrTooDeep indicates that document nesting exceeds MaxNestingDepth.
+var ErrTooDeep = errors.New("feediscovery: document nesting exceeds limit")
 
 // Link is an advertised feed link, not a verified feed document.
 type Link struct {
@@ -36,9 +42,10 @@ type Link struct {
 // empty when unknown. It is distinct from each link's Type.
 //
 // FindAll reads at most MaxDocumentSize+1 bytes from r and buffers the document
-// for two passes. It does not close r or fetch any URLs. No matches, including
-// non-HTML input, return nil, nil. Read, size, decoding, or scanning failures
-// return nil and an error, never partial results.
+// for two passes. Tracked HTML namespace/template nesting and all XML element
+// nesting are limited to MaxNestingDepth. It does not close r or fetch any URLs.
+// No matches, including non-HTML input, return nil, nil. Read, size, depth,
+// decoding, or scanning failures return nil and an error, never partial results.
 func FindAll(r io.Reader, pageURL, contentType string) ([]Link, error) {
 	if r == nil {
 		return nil, errors.New("feediscovery: document reader is nil")

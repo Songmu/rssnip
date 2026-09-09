@@ -63,7 +63,8 @@ eligible feed candidate in document order and fetches that single feed, not
 every linked feed. A `rel="alternate"` link qualifies through its media type,
 a feed-like filename/path token, or a standalone RSS/Atom word in its title.
 Fragments are removed from candidate URLs; links back to the same HTML document
-are skipped.
+are skipped. Hostnames and IPv6 addresses are lowercased for comparison, but
+IPv6 zone identifiers retain their original spelling.
 The first `<base href>` applies to all links, even when its value is empty.
 If that base URL is malformed, links resolve against the page URL instead.
 HTML decoding uses HTTP charset or HTML metadata; XHTML decoding uses the BOM,
@@ -122,6 +123,11 @@ two scanning passes. Its `MaxDocumentSize` is 32 MiB before decoding; it reads a
 most one byte beyond the limit to detect overflow. This is not a total memory
 limit. Passing existing bytes with `bytes.NewReader(body)` creates an additional
 buffer inside the library. The caller controls network timeouts and cancellation.
+
+Tracked HTML namespace/template frames and XML element nesting are limited to
+`MaxNestingDepth` (512). Excessive nesting returns `ErrTooDeep`, which can be
+identified with `errors.Is`; no partial candidates are returned. This bounds
+parser state rather than imposing a depth limit on untracked ordinary HTML.
 
 ### Pagination
 

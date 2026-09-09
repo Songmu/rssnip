@@ -25,4 +25,9 @@
 // errors return no partial links. HTML syntax recovery is retained; this package
 // is not a strict HTML validator. XHTML scanning errors anywhere in the document
 // fail discovery, even when a usable candidate occurred before the error.
+//
+// Tracked HTML namespace/template frames and XML element nesting are limited to
+// MaxNestingDepth (512). Excessive nesting returns ErrTooDeep without partial
+// results. Ordinary HTML elements outside tracked contexts do not need a stack;
+// this is a limit on parsing state, not validation of every HTML element's depth.
 package feediscovery

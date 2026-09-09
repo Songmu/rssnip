@@ -91,6 +91,19 @@ func TestFindAllPageURLContext(t *testing.T) {
 	}
 }
 
+func TestFindAllPreservesIPv6Zones(t *testing.T) {
+	t.Parallel()
+	body := mustReadTestdata(t, "ipv6-zone.html")
+	got, err := feediscovery.FindAll(bytes.NewReader(body), "HTTP://[FE80::AB%25ETH0]:80/blog/", "text/html")
+	want := []feediscovery.Link{
+		{URL: "http://[fe80::ab%25eth0]/blog/"},
+		{URL: "http://[fe80::ab%25ETH0]/feeds/feed.xml"},
+	}
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("links = %#v, error = %v, want %#v", got, err, want)
+	}
+}
+
 func TestFindAllInvalidArguments(t *testing.T) {
 	t.Parallel()
 	for _, page := range []string{

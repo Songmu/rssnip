@@ -11,6 +11,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/Songmu/rssnip/feediscovery"
 )
 
 func TestRunDiscoverySkipsNonFeedAlternates(t *testing.T) {
@@ -113,6 +115,13 @@ func TestRunDiscoveryReportsDocumentErrors(t *testing.T) {
 			"unknown encoding", "application/xhtml+xml; charset=unknown-charset",
 			`<html xmlns="http://www.w3.org/1999/xhtml"><link rel="feed" href="/first"/></html>`,
 			"decode document",
+		},
+		{
+			"excessive nesting", "text/html",
+			`<html><base href="/"/><link rel="feed" href="/first"/><svg>` +
+				strings.Repeat("<g>", feediscovery.MaxNestingDepth) +
+				strings.Repeat("</g>", feediscovery.MaxNestingDepth) + "</svg></html>",
+			"document nesting exceeds limit",
 		},
 		{"no candidates", "text/html", `<html><title>No feed</title></html>`, ""},
 	} {

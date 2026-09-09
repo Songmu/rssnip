@@ -67,7 +67,9 @@ func (tokenizer *discoveryTokenizer) nextHTML() (html.TokenType, html.Token, err
 			empty := ns == htmlNamespaceHTML && isHTMLVoid(token.DataAtom) ||
 				ns != htmlNamespaceHTML && kind == html.SelfClosingTagToken
 			if !empty && (ns != htmlNamespaceHTML || len(tokenizer.namespaces) > 0 || token.DataAtom == htmlatom.Template) {
-				tokenizer.pushHTMLNamespace(newHTMLFrame(token, ns))
+				if err := tokenizer.pushHTMLNamespace(newHTMLFrame(token, ns)); err != nil {
+					return html.ErrorToken, html.Token{}, err
+				}
 			}
 		}
 		if ns == htmlNamespaceHTML {
@@ -83,7 +85,10 @@ func (tokenizer *discoveryTokenizer) currentHTMLFrame() htmlNamespaceFrame {
 	return htmlNamespaceFrame{ns: htmlNamespaceHTML, htmlBoundary: -1}
 }
 
-func (tokenizer *discoveryTokenizer) pushHTMLNamespace(frame htmlNamespaceFrame) {
+func (tokenizer *discoveryTokenizer) pushHTMLNamespace(frame htmlNamespaceFrame) error {
+	if len(tokenizer.namespaces) >= MaxNestingDepth {
+		return ErrTooDeep
+	}
 	if tokenizer.openNames == nil {
 		tokenizer.openNames = make(map[string]int)
 	}
@@ -101,6 +106,7 @@ func (tokenizer *discoveryTokenizer) pushHTMLNamespace(frame htmlNamespaceFrame)
 	}
 	tokenizer.openNames[frame.name] = len(tokenizer.namespaces)
 	tokenizer.namespaces = append(tokenizer.namespaces, frame)
+	return nil
 }
 
 // Indexing the nearest matching name avoids rescanning a deep stack for every

@@ -1,6 +1,8 @@
 package feediscovery
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -60,7 +62,9 @@ func TestHTMLNamespaceStackRestoresNames(t *testing.T) {
 	t.Parallel()
 	tokenizer := newDiscoveryTokenizer(strings.NewReader(""), "text/html")
 	for _, name := range []string{"svg", "unknown-a", "unknown-b", "unknown-a"} {
-		tokenizer.pushHTMLNamespace(htmlNamespaceFrame{name: name, ns: htmlNamespaceSVG})
+		if err := tokenizer.pushHTMLNamespace(htmlNamespaceFrame{name: name, ns: htmlNamespaceSVG}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	tokenizer.popHTMLNamespaces(3)
 	if index := tokenizer.openNames["unknown-a"]; index != 1 {
@@ -78,7 +82,7 @@ func TestHTMLNamespaceStackRestoresNames(t *testing.T) {
 
 func TestHTMLNamespaceDeepUnmatchedEndTags(t *testing.T) {
 	t.Parallel()
-	body := "<html><svg>" + strings.Repeat("<g>", 4096) +
+	body := "<html><svg>" + strings.Repeat("<g>", MaxNestingDepth-1) +
 		strings.Repeat("</missing>", 4096) + `</svg><link rel="feed" href="/rss"></html>`
 	tokenizer := newDiscoveryTokenizer(strings.NewReader(body), "text/html")
 	var links int
@@ -87,6 +91,7 @@ func TestHTMLNamespaceDeepUnmatchedEndTags(t *testing.T) {
 		if err == io.EOF {
 			break
 		}
+
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -96,5 +101,22 @@ func TestHTMLNamespaceDeepUnmatchedEndTags(t *testing.T) {
 	}
 	if links != 1 || len(tokenizer.namespaces) != 0 || len(tokenizer.openNames) != 0 {
 		t.Errorf("links = %d, frames = %d, names = %d", links, len(tokenizer.namespaces), len(tokenizer.openNames))
+	}
+}
+
+func TestHTMLNamespaceDepthGuard(t *testing.T) {
+	t.Parallel()
+	tokenizer := newDiscoveryTokenizer(strings.NewReader(""), "text/html")
+	for i := 0; i < MaxNestingDepth; i++ {
+		err := tokenizer.pushHTMLNamespace(htmlNamespaceFrame{name: fmt.Sprintf("element-%d", i), ns: htmlNamespaceSVG})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tokenizer.pushHTMLNamespace(htmlNamespaceFrame{name: "overflow", ns: htmlNamespaceSVG}); !errors.Is(err, ErrTooDeep) {
+		t.Fatalf("overflow error = %v, want ErrTooDeep", err)
+	}
+	if len(tokenizer.namespaces) != MaxNestingDepth || len(tokenizer.openNames) != MaxNestingDepth {
+		t.Errorf("overflow mutated state: frames = %d, names = %d", len(tokenizer.namespaces), len(tokenizer.openNames))
 	}
 }

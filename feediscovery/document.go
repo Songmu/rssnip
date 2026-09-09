@@ -54,8 +54,9 @@ func discoveryReader(body []byte, contentType string) (io.Reader, error) {
 }
 
 type discoveryTokenizer struct {
-	html *html.Tokenizer
-	xml  *xml.Decoder
+	html     *html.Tokenizer
+	xml      *xml.Decoder
+	xmlDepth int
 
 	// Track foreign content and its HTML descendants without building a DOM.
 	namespaces []htmlNamespaceFrame
@@ -89,8 +90,13 @@ func (tokenizer *discoveryTokenizer) next() (html.TokenType, html.Token, error) 
 		kind := html.StartTagToken
 		switch element := value.(type) {
 		case xml.StartElement:
+			if tokenizer.xmlDepth >= MaxNestingDepth {
+				return html.ErrorToken, html.Token{}, ErrTooDeep
+			}
+			tokenizer.xmlDepth++
 			name, attributes = element.Name, element.Attr
 		case xml.EndElement:
+			tokenizer.xmlDepth--
 			name = element.Name
 			kind = html.EndTagToken
 		default:
@@ -123,6 +129,9 @@ func nextDocumentTag(tokenizer *discoveryTokenizer, templateDepth *int) (html.To
 						*templateDepth--
 					}
 				} else {
+					if *templateDepth >= MaxNestingDepth {
+						return html.Token{}, ErrTooDeep
+					}
 					*templateDepth++
 				}
 				continue
