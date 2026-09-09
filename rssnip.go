@@ -14,17 +14,6 @@ import (
 
 const cmdName = "rssnip"
 
-type stringList []string
-
-func (ss *stringList) String() string {
-	return strings.Join(*ss, ",")
-}
-
-func (ss *stringList) Set(value string) error {
-	*ss = append(*ss, value)
-	return nil
-}
-
 // Run runs rssnip with the supplied command-line arguments.
 func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (runErr error) {
 	return run(ctx, argv, os.Stdin, outStream, errStream)
@@ -35,16 +24,15 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 		fmt.Sprintf("%s (v%s rev:%s)", cmdName, version, revision), flag.ContinueOnError)
 	fs.SetOutput(errStream)
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: %s [options] [--url URL ...] [URL ...]\n\n", cmdName)
-		fmt.Fprintln(fs.Output(), "Feed or blog/site URLs may be supplied with --url, as positional arguments,")
-		fmt.Fprintln(fs.Output(), "or one per line on standard input. HTML pages are searched for a feed link.")
+		fmt.Fprintf(fs.Output(), "Usage: %s [options] [URL ...]\n\n", cmdName)
+		fmt.Fprintln(fs.Output(), "Feed or blog/site URLs may be supplied as positional arguments")
+		fmt.Fprintln(fs.Output(), "or one per line on standard input. Positional URLs are processed first.")
+		fmt.Fprintln(fs.Output(), "Place options before URLs. HTML pages are searched for a feed link.")
 		fmt.Fprintln(fs.Output(), "Options:")
 		fs.PrintDefaults()
 	}
 
 	ver := fs.Bool("version", false, "display version")
-	var urls stringList
-	fs.Var(&urls, "url", "feed or blog/site URL (repeatable)")
 	sinceValue := fs.String("since", "", "include items on or after RFC3339 time or YYYY-MM-DD")
 	untilValue := fs.String("until", "", "include items on or before RFC3339 time or YYYY-MM-DD")
 	jqExpression := fs.String("jq", "", "apply a jq expression to each item")
@@ -61,7 +49,7 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 	if err != nil {
 		return fmt.Errorf("read feed or blog/site URLs from standard input: %w", err)
 	}
-	urls = append(urls, fs.Args()...)
+	urls := append([]string(nil), fs.Args()...)
 	urls = append(urls, stdinURLs...)
 	if len(urls) == 0 {
 		fs.Usage()

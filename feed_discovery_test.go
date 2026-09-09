@@ -210,12 +210,16 @@ func TestHelpDescribesBlogURLInputs(t *testing.T) {
 		t.Fatalf("error = %v, want flag.ErrHelp", err)
 	}
 	for _, want := range []string{
+		"Usage: rssnip [options] [URL ...]",
 		"Feed or blog/site URLs", "positional arguments", "standard input",
-		"feed or blog/site URL (repeatable)",
+		"Positional URLs are processed first.", "Place options before URLs.",
 	} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("help missing %q:\n%s", want, stderr.String())
 		}
+	}
+	if strings.Contains(stderr.String(), "-url") {
+		t.Errorf("help contains removed URL option:\n%s", stderr.String())
 	}
 }
 
