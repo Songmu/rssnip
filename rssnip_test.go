@@ -129,7 +129,7 @@ func TestRunDiscoversFeedFromBOMPrefixedHTML(t *testing.T) {
 		switch r.URL.Path {
 		case "/":
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			fmt.Fprint(w, "\xef\xbb\xbf<html><head><link rel=\"feed\" href=\"/rss\"></head></html>")
+			fmt.Fprint(w, "\xef\xbb\xbf\n  <html><head><link rel=\"feed\" href=\"/rss\"></head></html>")
 		case "/rss":
 			w.Header().Set("Content-Type", "application/rss+xml")
 			fmt.Fprint(w, testRSS)
