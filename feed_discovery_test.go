@@ -117,6 +117,20 @@ func TestDiscoveryUsesBaseAfterLink(t *testing.T) {
 			t.Errorf("discovery = %q, %v", got, ok)
 		}
 	}
+
+}
+
+func TestDiscoveryRecognizesLeadingHTMLComments(t *testing.T) {
+	t.Parallel()
+	for _, prefix := range []string{"<!-- generated -->", "\xef\xbb\xbf\n<!-- generated -->\n"} {
+		for _, contentType := range []string{"", "text/plain", "application/octet-stream"} {
+			body := []byte(prefix + `<html><link rel="feed" href="/rss"></html>`)
+			got, ok := discoverFeedURL(body, "https://example.com/blog/", contentType)
+			if !ok || got != "https://example.com/rss" {
+				t.Errorf("discovery with %q prefix and %q content type = %q, %v", prefix, contentType, got, ok)
+			}
+		}
+	}
 }
 
 func TestDiscoveryUsesFirstBaseRegardlessOfFetchability(t *testing.T) {

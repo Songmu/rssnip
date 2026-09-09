@@ -330,6 +330,7 @@ func looksLikeHTML(body []byte, contentType string) bool {
 	trimmed := bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(body), []byte("\xef\xbb\xbf")))
 	lower := bytes.ToLower(trimmed)
 	return bytes.HasPrefix(lower, []byte("<!doctype html")) ||
+		bytes.HasPrefix(lower, []byte("<!--")) ||
 		bytes.HasPrefix(lower, []byte("<html")) ||
 		bytes.HasPrefix(lower, []byte("<head")) ||
 		bytes.HasPrefix(lower, []byte("<?xml-stylesheet"))
