@@ -188,3 +188,48 @@ func TestHelpDescribesBlogURLInputs(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoveryDoesNotFollowHTMLPagination(t *testing.T) {
+	t.Parallel()
+	for _, initial := range []string{"/blog", "/first"} {
+		t.Run(initial, func(t *testing.T) {
+			var requests []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests = append(requests, r.URL.Path)
+				switch r.URL.Path {
+				case "/blog":
+					w.Header().Set("Content-Type", "text/html")
+					fmt.Fprint(w, `<html><head><link rel="feed" href="/first"></head></html>`)
+				case "/first":
+					w.Header().Set("Content-Type", "application/feed+json")
+					fmt.Fprint(w, `{"version":"https://jsonfeed.org/version/1.1","next_url":"/archive","items":[{"id":"one"}]}`)
+				case "/archive":
+					w.Header().Set("Content-Type", "text/html")
+					fmt.Fprint(w, `<html><head><link rel="feed" href="/different"></head></html>`)
+				case "/different":
+					w.Header().Set("Content-Type", "application/feed+json")
+					fmt.Fprint(w, `{"version":"https://jsonfeed.org/version/1.1","items":[{"id":"unrelated"}]}`)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			var stdout, stderr bytes.Buffer
+			err := run(context.Background(), []string{server.URL + initial}, strings.NewReader(""), &stdout, &stderr)
+			if err == nil || !strings.Contains(err.Error(), "parse feed") || !strings.Contains(err.Error(), "/archive") {
+				t.Fatalf("error = %v, want archive parse error", err)
+			}
+			server.Close()
+			want := []string{"/first", "/archive"}
+			if initial == "/blog" {
+				want = append([]string{"/blog"}, want...)
+			}
+			if !reflect.DeepEqual(requests, want) {
+				t.Errorf("requests = %v, want %v", requests, want)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("unexpected output after pagination failure: %s", stdout.String())
+			}
+		})
+	}
+}

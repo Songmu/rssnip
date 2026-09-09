@@ -120,7 +120,7 @@ func fetchFeedPages(ctx context.Context, client *http.Client, feedURL string, ma
 		}
 		seenURLs[nextURL] = struct{}{}
 
-		pageItems, sourceURL, followingURL, err := fetchFeedPage(ctx, client, nextURL)
+		pageItems, sourceURL, followingURL, err := fetchFeedPage(ctx, client, nextURL, page == 0)
 		if err != nil {
 			return nil, err
 		}
@@ -137,13 +137,16 @@ func fetchFeedPages(ctx context.Context, client *http.Client, feedURL string, ma
 	return items, nil
 }
 
-func fetchFeedPage(ctx context.Context, client *http.Client, feedURL string) ([]Item, string, string, error) {
+func fetchFeedPage(ctx context.Context, client *http.Client, feedURL string, allowDiscovery bool) ([]Item, string, string, error) {
 	body, sourceURL, contentType, err := fetchFeedDocument(ctx, client, feedURL)
 	if err != nil {
 		return nil, "", "", err
 	}
 	items, parseErr := parseFeed(body, sourceURL)
 	if parseErr != nil {
+		if !allowDiscovery {
+			return nil, "", "", parseErr
+		}
 		discoveredURL, ok := discoverFeedURL(body, sourceURL, contentType)
 		if !ok {
 			return nil, "", "", parseErr

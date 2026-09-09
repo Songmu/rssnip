@@ -67,6 +67,9 @@ are skipped.
 If the selected URL fails to fetch or parse as a feed, the error is returned;
 later candidates are not retried. Pagination of the selected feed follows the
 same rules as a direct feed URL.
+Discovery is limited to the initial supplied URL. Pagination responses must be
+feeds; an HTML response on a later page is a parse error, not another discovery
+opportunity.
 
 ### Pagination
 
