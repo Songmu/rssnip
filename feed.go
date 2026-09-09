@@ -167,7 +167,7 @@ func fetchLocalFeed(ctx context.Context, feedName string, parsedURL *url.URL) ([
 	}
 	path := feedName
 	if parsedURL != nil {
-		if parsedURL.Host != "" && !strings.EqualFold(parsedURL.Host, "localhost") {
+		if parsedURL.Host != "" && !strings.EqualFold(parsedURL.Host, "localhost") && runtime.GOOS != "windows" {
 			return nil, fmt.Errorf("invalid feed URL %q: file URL host is not allowed", displayURL(feedName))
 		}
 		path = localPathFromFileURL(parsedURL)
@@ -220,6 +220,9 @@ func (r contextReader) Read(p []byte) (int, error) {
 }
 
 func isLocalFeedPath(value string) bool {
+	if runtime.GOOS == "windows" && isWindowsDrivePath(value) {
+		return true
+	}
 	if isWindowsAbsolutePath(value) {
 		return true
 	}
@@ -255,13 +258,20 @@ func hasURLScheme(value string) bool {
 }
 
 func isWindowsAbsolutePath(value string) bool {
-	return len(value) >= 3 &&
+	return len(value) >= 3 && isWindowsDrivePath(value) && (value[2] == '/' || value[2] == '\\')
+}
+
+func isWindowsDrivePath(value string) bool {
+	return len(value) >= 2 &&
 		((value[0] >= 'a' && value[0] <= 'z') || (value[0] >= 'A' && value[0] <= 'Z')) &&
-		value[1] == ':' && (value[2] == '/' || value[2] == '\\')
+		value[1] == ':'
 }
 
 func localPathFromFileURL(fileURL *url.URL) string {
 	path := fileURL.Path
+	if runtime.GOOS == "windows" && fileURL.Host != "" && !strings.EqualFold(fileURL.Host, "localhost") {
+		return `\\` + fileURL.Host + filepath.FromSlash(path)
+	}
 	if runtime.GOOS == "windows" && len(path) > 1 && isWindowsAbsolutePath(path[1:]) {
 		path = strings.TrimPrefix(path, "/")
 	}
