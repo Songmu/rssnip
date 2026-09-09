@@ -56,6 +56,24 @@ func discoveryReader(body []byte, contentType string) (io.Reader, error) {
 type discoveryTokenizer struct {
 	html *html.Tokenizer
 	xml  *xml.Decoder
+
+	// namespaces tracks open HTML elements that establish a foreign-content
+	// (SVG/MathML) namespace, so link/base elements inside them are ignored.
+	namespaces []htmlNamespaceFrame
+}
+
+// htmlNamespaceKind identifies the namespace an HTML element belongs to.
+type htmlNamespaceKind int8
+
+const (
+	htmlNamespaceHTML htmlNamespaceKind = iota
+	htmlNamespaceSVG
+	htmlNamespaceMathML
+)
+
+type htmlNamespaceFrame struct {
+	atom htmlatom.Atom
+	ns   htmlNamespaceKind
 }
 
 func newDiscoveryTokenizer(reader io.Reader, contentType string) *discoveryTokenizer {
@@ -73,14 +91,29 @@ func newDiscoveryTokenizer(reader io.Reader, contentType string) *discoveryToken
 
 func (tokenizer *discoveryTokenizer) next() (html.TokenType, html.Token, error) {
 	if tokenizer.html != nil {
-		kind := tokenizer.html.Next()
-		if kind == html.ErrorToken {
-			return kind, html.Token{}, tokenizer.html.Err()
+		for {
+			kind := tokenizer.html.Next()
+			if kind == html.ErrorToken {
+				return kind, html.Token{}, tokenizer.html.Err()
+			}
+			if kind != html.StartTagToken && kind != html.SelfClosingTagToken && kind != html.EndTagToken {
+				return kind, html.Token{}, nil
+			}
+			token := tokenizer.html.Token()
+			ownNS := tokenizer.currentHTMLNamespace()
+			if kind == html.EndTagToken {
+				tokenizer.popHTMLNamespace(token.DataAtom)
+			} else if kind == html.StartTagToken && isHTMLNamespaceContainer(token.DataAtom) {
+				tokenizer.pushHTMLNamespace(token.DataAtom, nextHTMLNamespace(ownNS, token))
+			}
+			if ownNS != htmlNamespaceHTML {
+				// Lexical tokenization does not assign namespaces, so
+				// SVG/MathML foreign content is skipped here to avoid
+				// treating it as HTML metadata (e.g. link/base elements).
+				continue
+			}
+			return kind, token, nil
 		}
-		if kind == html.StartTagToken || kind == html.SelfClosingTagToken || kind == html.EndTagToken {
-			return kind, tokenizer.html.Token(), nil
-		}
-		return kind, html.Token{}, nil
 	}
 	for {
 		value, err := tokenizer.xml.Token()
@@ -135,6 +168,73 @@ func nextDocumentTag(tokenizer *discoveryTokenizer, templateDepth *int) (html.To
 			}
 		}
 	}
+}
+
+func (tokenizer *discoveryTokenizer) currentHTMLNamespace() htmlNamespaceKind {
+	if n := len(tokenizer.namespaces); n > 0 {
+		return tokenizer.namespaces[n-1].ns
+	}
+	return htmlNamespaceHTML
+}
+
+func (tokenizer *discoveryTokenizer) pushHTMLNamespace(a htmlatom.Atom, ns htmlNamespaceKind) {
+	tokenizer.namespaces = append(tokenizer.namespaces, htmlNamespaceFrame{atom: a, ns: ns})
+}
+
+func (tokenizer *discoveryTokenizer) popHTMLNamespace(a htmlatom.Atom) {
+	if n := len(tokenizer.namespaces); n > 0 && tokenizer.namespaces[n-1].atom == a {
+		tokenizer.namespaces = tokenizer.namespaces[:n-1]
+	}
+}
+
+// isHTMLNamespaceContainer reports whether atom is an element that can
+// establish or exit a foreign-content namespace, per the HTML5 tree
+// construction rules for foreign content and integration points.
+func isHTMLNamespaceContainer(a htmlatom.Atom) bool {
+	switch a {
+	case htmlatom.Svg, htmlatom.Math,
+		htmlatom.Foreignobject, htmlatom.Desc, htmlatom.Title,
+		htmlatom.AnnotationXml,
+		htmlatom.Mi, htmlatom.Mo, htmlatom.Mn, htmlatom.Ms, htmlatom.Mtext:
+		return true
+	default:
+		return false
+	}
+}
+
+// nextHTMLNamespace computes the namespace that applies to the children of an
+// element with namespace parent and the given start tag token.
+func nextHTMLNamespace(parent htmlNamespaceKind, token html.Token) htmlNamespaceKind {
+	switch parent {
+	case htmlNamespaceHTML:
+		switch token.DataAtom {
+		case htmlatom.Svg:
+			return htmlNamespaceSVG
+		case htmlatom.Math:
+			return htmlNamespaceMathML
+		}
+	case htmlNamespaceSVG:
+		// HTML integration points: contents are parsed as HTML again.
+		switch token.DataAtom {
+		case htmlatom.Foreignobject, htmlatom.Desc, htmlatom.Title:
+			return htmlNamespaceHTML
+		}
+		return htmlNamespaceSVG
+	case htmlNamespaceMathML:
+		// MathML text integration points and the annotation-xml HTML
+		// integration point resume HTML parsing for their contents.
+		switch token.DataAtom {
+		case htmlatom.Mi, htmlatom.Mo, htmlatom.Mn, htmlatom.Ms, htmlatom.Mtext:
+			return htmlNamespaceHTML
+		case htmlatom.AnnotationXml:
+			encoding := tokenAttr(token, "encoding")
+			if strings.EqualFold(encoding, "text/html") || strings.EqualFold(encoding, "application/xhtml+xml") {
+				return htmlNamespaceHTML
+			}
+		}
+		return htmlNamespaceMathML
+	}
+	return htmlNamespaceHTML
 }
 
 func tokenAttr(token html.Token, name string) string {

@@ -167,6 +167,21 @@ func TestDiscoveryUsesFirstBaseRegardlessOfFetchability(t *testing.T) {
 	}
 }
 
+func TestDiscoveryHTMLIgnoresForeignNamespace(t *testing.T) {
+	t.Parallel()
+	for _, fixture := range []string{
+		"foreign-namespace.html", "foreign-namespace-integration.html", "foreign-namespace-mathml.html",
+	} {
+		t.Run(fixture, func(t *testing.T) {
+			body := mustReadTestdata(t, fixture)
+			got, ok := firstURL(t, body, "https://example.com/blog/", "text/html")
+			if !ok || got != "https://example.com/correct/rss" {
+				t.Errorf("discovery = %q, %v", got, ok)
+			}
+		})
+	}
+}
+
 func TestDiscoveryIgnoresTemplateContents(t *testing.T) {
 	t.Parallel()
 	body := mustReadTestdata(t, "templates.html")
