@@ -26,6 +26,8 @@ func TestRunDiscoverySkipsNonFeedAlternates(t *testing.T) {
 			  <link rel="alternate" href="/feedback">
 			  <link rel="alternate" href="/anatomy" title="Anatomy">
 			  <link rel="alternate" href="/newsfeed">
+			  <link rel="feed" href="#rss">
+			  <link rel="alternate" type="application/rss+xml" href="/#atom">
 			  <link rel="alternate" href="/feed.xml" type="application/rss+xml">
 			  <link rel="feed" href="/second.xml">
 			</head></html>`)
@@ -78,6 +80,8 @@ func TestDiscoverFeedURLHints(t *testing.T) {
 		{"title suffix", `<link rel="alternate" href="/updates" title="RSSReader">`, false},
 		{"hostname", `<link rel="alternate" href="https://feed.example.com">`, false},
 		{"fragment", `<link rel="alternate" href="#feed">`, false},
+		{"qualified same-document fragment", `<link rel="feed" href="#rss">`, false},
+		{"absolute same-document fragment", `<link rel="feed" href="https://example.com/blog/#rss">`, false},
 		{"unrelated relation", `<link rel="stylesheet" href="/feed.xml">`, false},
 	}
 	for _, tt := range tests {
@@ -86,6 +90,60 @@ func TestDiscoverFeedURLHints(t *testing.T) {
 				"https://example.com/blog/", "text/html")
 			if ok != tt.want {
 				t.Errorf("discovered = %v, want %v", ok, tt.want)
+			}
+		})
+	}
+}
+
+func TestDiscoveryCandidateFragmentUsesHTMLBase(t *testing.T) {
+	t.Parallel()
+	body := []byte(`<html><head><base href="/feed.xml"><link rel="feed" href="#rss"></head></html>`)
+	got, ok := discoverFeedURL(body, "https://example.com/blog/", "text/html")
+	if !ok || got != "https://example.com/feed.xml" {
+		t.Errorf("discovery = %q, %v", got, ok)
+	}
+}
+
+func TestRunDiscoveryReturnsFirstCandidateFailure(t *testing.T) {
+	t.Parallel()
+	for _, failure := range []string{"fetch", "parse"} {
+		t.Run(failure, func(t *testing.T) {
+			var requests []string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests = append(requests, r.URL.Path)
+				switch r.URL.Path {
+				case "/":
+					w.Header().Set("Content-Type", "text/html")
+					fmt.Fprint(w, `<html><head>
+					  <link rel="feed" href="/first">
+					  <link rel="feed" href="/second">
+					</head></html>`)
+				case "/first":
+					if failure == "fetch" {
+						http.NotFound(w, r)
+					} else {
+						fmt.Fprint(w, "not a feed")
+					}
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+			var stdout, stderr bytes.Buffer
+			err := run(context.Background(), []string{server.URL}, strings.NewReader(""), &stdout, &stderr)
+			wantError := "404 Not Found"
+			if failure == "parse" {
+				wantError = "parse feed"
+			}
+			if err == nil || !strings.Contains(err.Error(), wantError) || !strings.Contains(err.Error(), "/first") {
+				t.Fatalf("error = %v, want %q for first candidate", err, wantError)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("unexpected output: %s", stdout.String())
+			}
+			server.Close()
+			if want := []string{"/", "/first"}; !reflect.DeepEqual(requests, want) {
+				t.Errorf("requests = %v, want %v", requests, want)
 			}
 		})
 	}

@@ -227,6 +227,7 @@ func discoverFeedURL(body []byte, sourceURL, contentType string) (string, bool) 
 	}
 	tokenizer := html.NewTokenizer(reader)
 	baseURL := sourceURL
+	sourceFetchURL := discoveryFetchURL(sourceURL)
 	baseResolved := false
 	for {
 		switch tokenizer.Next() {
@@ -262,14 +263,27 @@ func discoverFeedURL(body []byte, sourceURL, contentType string) (string, bool) 
 				linkType := tokenAttr(token, "type")
 				title := tokenAttr(token, "title")
 				if isFeed || isFeedMediaType(linkType) || looksLikeFeedPath(href) || hasFeedHint(title, "rss", "atom") {
-					resolved := resolveURL(baseURL, href)
-					if isDiscoverableFeedURL(resolved) {
+					resolved := discoveryFetchURL(resolveURL(baseURL, href))
+					if resolved != sourceFetchURL && isDiscoverableFeedURL(resolved) {
 						return resolved, true
 					}
 				}
 			}
 		}
 	}
+}
+
+func discoveryFetchURL(value string) string {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return value
+	}
+	parsed.Fragment, parsed.RawFragment = "", ""
+	// HTTP requests for an empty path target "/", too.
+	if parsed.Path == "" {
+		parsed.Path = "/"
+	}
+	return parsed.String()
 }
 
 func tokenAttr(token html.Token, name string) string {

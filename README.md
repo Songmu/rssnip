@@ -62,6 +62,8 @@ item order. When a URL returns an HTML page instead of a feed, `rssnip` scans
 eligible feed candidate in document order and fetches that single feed, not
 every linked feed. A `rel="alternate"` link qualifies through its media type,
 a feed-like filename/path token, or a standalone RSS/Atom word in its title.
+Fragments are removed from candidate URLs; links back to the same HTML document
+are skipped.
 If the selected URL fails to fetch or parse as a feed, the error is returned;
 later candidates are not retried. Pagination of the selected feed follows the
 same rules as a direct feed URL.
