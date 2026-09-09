@@ -6,6 +6,8 @@
 // path hint, or RSS/Atom title word. URLs are resolved against the first
 // base[href] and the supplied document URL. Same-document links, non-HTTP(S)
 // URLs, and URLs with userinfo are excluded. Template contents are ignored.
+// HTML discovery distinguishes SVG/MathML content from HTML integration points,
+// including SVG title elements and the MathML text integration exceptions.
 //
 // The document's Content-Type controls charset decoding and HTML versus XHTML
 // tokenization. It may be empty when unknown. HTML metadata and XML declarations

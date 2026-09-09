@@ -69,6 +69,8 @@ If that base URL is malformed, links resolve against the page URL instead.
 HTML decoding uses HTTP charset or HTML metadata; XHTML decoding uses the BOM,
 HTTP charset, or XML declaration, defaulting to UTF-8. XHTML uses XML tokenization
 and the XHTML namespace; template contents are ignored in both formats.
+For HTML, links and bases in SVG/MathML are ignored unless they belong to HTML
+content, such as links inside SVG `title` or `foreignObject` integration points.
 If the selected URL fails to fetch or parse as a feed, the error is returned;
 later candidates are not retried. Pagination of the selected feed follows the
 same rules as a direct feed URL.

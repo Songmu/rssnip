@@ -2,8 +2,11 @@ package feediscovery_test
 
 import (
 	"bytes"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/Songmu/rssnip/feediscovery"
 )
 
 func TestDiscoverFeedURLHints(t *testing.T) {
@@ -177,6 +180,26 @@ func TestDiscoveryHTMLIgnoresForeignNamespace(t *testing.T) {
 			got, ok := firstURL(t, body, "https://example.com/blog/", "text/html")
 			if !ok || got != "https://example.com/correct/rss" {
 				t.Errorf("discovery = %q, %v", got, ok)
+			}
+		})
+	}
+}
+
+func TestDiscoveryHTMLForeignContentTransitions(t *testing.T) {
+	t.Parallel()
+	for _, fixture := range []string{
+		"foreign-svg-title.html", "foreign-html-breakout.html",
+		"foreign-mathml-text-exceptions.html", "foreign-mathml-html-child.html",
+		"foreign-breakout-font.html", "foreign-breakout-integration.html",
+		"foreign-cdata.html", "foreign-end-tag.html", "foreign-svg-raw-text.html",
+		"foreign-html-raw-text.html", "foreign-html-end-tag.html", "foreign-template.html",
+	} {
+		t.Run(fixture, func(t *testing.T) {
+			body := mustReadTestdata(t, fixture)
+			got, err := feediscovery.FindAll(bytes.NewReader(body), "https://example.com/blog/", "text/html")
+			want := []feediscovery.Link{{URL: "https://example.com/correct/rss"}}
+			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Errorf("links = %#v, error = %v, want %#v", got, err, want)
 			}
 		})
 	}
