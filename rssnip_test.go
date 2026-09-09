@@ -122,6 +122,37 @@ func TestRunDiscoversFeedFromRelFeedLink(t *testing.T) {
 	}
 }
 
+func TestRunDiscoversFeedFromNonUTF8HTML(t *testing.T) {
+	t.Parallel()
+	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
+	// "café" encoded as ISO-8859-1 (Latin-1), where the "é" is the single
+	// byte 0xE9 rather than its two-byte UTF-8 encoding.
+	page := []byte("<html><head><base href=\"/blog/caf\xe9/\"><link rel=\"feed\" href=\"feed.xml\"></head></html>")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/blog/":
+			w.Header().Set("Content-Type", "text/html; charset=iso-8859-1")
+			w.Write(page)
+		case "/blog/café/feed.xml":
+			w.Header().Set("Content-Type", "application/rss+xml")
+			fmt.Fprint(w, testRSS)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{"--url", server.URL + "/blog/", "--with-feed", "--jq", "._feed.feed_url", "-r"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Repeat(server.URL+"/blog/caf%C3%A9/feed.xml\n", 4)
+	if got := stdout.String(); got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
 func TestRunAcceptsURLsFromStdinAndMergesSources(t *testing.T) {
 	t.Parallel()
 	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
