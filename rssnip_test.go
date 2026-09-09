@@ -35,6 +35,152 @@ func TestRunFiltersAndAppliesRawJQ(t *testing.T) {
 	}
 }
 
+func TestRunDiscoversFeedFromBlogURL(t *testing.T) {
+	t.Parallel()
+	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("User-Agent"); !strings.HasPrefix(got, "rssnip/") {
+			t.Errorf("User-Agent = %q", got)
+		}
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprintf(w, `<html><head><link rel="alternate" type="application/rss+xml" href="/feeds/index.xml"></head></html>`)
+		case "/feeds/index.xml":
+			w.Header().Set("Content-Type", "application/rss+xml")
+			fmt.Fprint(w, testRSS)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{"--url", server.URL, "--with-feed", "--jq", "._feed.feed_url", "-r"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Repeat(server.URL+"/feeds/index.xml\n", 4)
+	if got := stdout.String(); got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestRunDiscoversFeedFromBlogURLWithBaseHref(t *testing.T) {
+	t.Parallel()
+	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/blog/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, `<html><head><link rel="alternate" type="application/rss+xml" href="feed.xml"><base href="/assets/"></head></html>`)
+		case "/assets/feed.xml":
+			w.Header().Set("Content-Type", "application/rss+xml")
+			fmt.Fprint(w, testRSS)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{"--url", server.URL + "/blog/", "--with-feed", "--jq", "._feed.feed_url", "-r"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Repeat(server.URL+"/assets/feed.xml\n", 4)
+	if got := stdout.String(); got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestRunDiscoversFeedFromRelFeedLink(t *testing.T) {
+	t.Parallel()
+	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, `<html><head><link rel="feed" href="/rss"></head></html>`)
+		case "/rss":
+			w.Header().Set("Content-Type", "application/rss+xml")
+			fmt.Fprint(w, testRSS)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{"--url", server.URL, "--with-feed", "--jq", "._feed.feed_url", "-r"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Repeat(server.URL+"/rss\n", 4)
+	if got := stdout.String(); got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestRunDiscoversFeedFromBOMPrefixedHTML(t *testing.T) {
+	t.Parallel()
+	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			fmt.Fprint(w, "\xef\xbb\xbf\n  <!-- generated -->\n<html><head><link rel=\"feed\" href=\"/rss\"></head></html>")
+		case "/rss":
+			w.Header().Set("Content-Type", "application/rss+xml")
+			fmt.Fprint(w, testRSS)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{"--url", server.URL, "--with-feed", "--jq", "._feed.feed_url", "-r"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Repeat(server.URL+"/rss\n", 4)
+	if got := stdout.String(); got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestRunDiscoversFeedFromNonUTF8HTML(t *testing.T) {
+	t.Parallel()
+	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
+	// "café" encoded as ISO-8859-1 (Latin-1), where the "é" is the single
+	// byte 0xE9 rather than its two-byte UTF-8 encoding.
+	page := []byte("<html><head><base href=\"/blog/caf\xe9/\"><link rel=\"feed\" href=\"feed.xml\"></head></html>")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/blog/":
+			w.Header().Set("Content-Type", "text/html; charset=iso-8859-1")
+			w.Write(page)
+		case "/blog/café/feed.xml":
+			w.Header().Set("Content-Type", "application/rss+xml")
+			fmt.Fprint(w, testRSS)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{"--url", server.URL + "/blog/", "--with-feed", "--jq", "._feed.feed_url", "-r"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Repeat(server.URL+"/blog/caf%C3%A9/feed.xml\n", 4)
+	if got := stdout.String(); got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
 func TestRunAcceptsURLsFromStdinAndMergesSources(t *testing.T) {
 	t.Parallel()
 	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
@@ -179,7 +325,7 @@ func TestRunErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"missing URL", nil, "at least one feed URL is required"},
+		{"missing URL", nil, "at least one feed or blog/site URL is required"},
 		{"raw without jq", []string{"-r", "https://example.com/feed"}, "-r requires --jq"},
 		{"removed JSON option", []string{"--json", "https://example.com/feed"}, "flag provided but not defined: -json"},
 		{"invalid since", []string{"--since", "yesterday", "https://example.com/feed"}, "invalid --since"},

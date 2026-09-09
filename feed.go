@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Songmu/rssnip/feediscovery"
 	"github.com/mmcdole/gofeed"
 	"github.com/mmcdole/gofeed/atom"
 	"golang.org/x/net/html/charset"
@@ -117,7 +118,7 @@ func fetchFeedPages(ctx context.Context, client *http.Client, feedURL string, ma
 		}
 		seenURLs[nextURL] = struct{}{}
 
-		pageItems, sourceURL, followingURL, err := fetchFeedPage(ctx, client, nextURL)
+		pageItems, sourceURL, followingURL, err := fetchFeedPage(ctx, client, nextURL, page == 0)
 		if err != nil {
 			return nil, err
 		}
@@ -134,7 +135,37 @@ func fetchFeedPages(ctx context.Context, client *http.Client, feedURL string, ma
 	return items, nil
 }
 
-func fetchFeedPage(ctx context.Context, client *http.Client, feedURL string) ([]Item, string, string, error) {
+func fetchFeedPage(ctx context.Context, client *http.Client, feedURL string, allowDiscovery bool) ([]Item, string, string, error) {
+	body, sourceURL, contentType, err := fetchFeedDocument(ctx, client, feedURL)
+	if err != nil {
+		return nil, "", "", err
+	}
+	items, parseErr := parseFeed(body, sourceURL)
+	if parseErr != nil {
+		if !allowDiscovery {
+			return nil, "", "", parseErr
+		}
+		links, discoveryErr := feediscovery.FindAll(bytes.NewReader(body), sourceURL, contentType)
+		if discoveryErr != nil {
+			return nil, "", "", fmt.Errorf("%w; discover feed links: %w", parseErr, discoveryErr)
+		}
+		if len(links) == 0 {
+			return nil, "", "", parseErr
+		}
+		body, sourceURL, _, err = fetchFeedDocument(ctx, client, links[0].URL)
+		if err != nil {
+			return nil, "", "", err
+		}
+		items, err = parseFeed(body, sourceURL)
+		if err != nil {
+			return nil, "", "", err
+		}
+	}
+	nextURL, _ := nextPageURL(body, sourceURL)
+	return items, sourceURL, nextURL, nil
+}
+
+func fetchFeedDocument(ctx context.Context, client *http.Client, feedURL string) ([]byte, string, string, error) {
 	parsedURL, err := url.ParseRequestURI(feedURL)
 	if err != nil || parsedURL.Host == "" ||
 		(parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
@@ -183,12 +214,7 @@ func fetchFeedPage(ctx context.Context, client *http.Client, feedURL string) ([]
 		sourceURL = resp.Request.URL.String()
 	}
 	sourceURL = displayURL(sourceURL)
-	items, err := parseFeed(body, sourceURL)
-	if err != nil {
-		return nil, "", "", err
-	}
-	nextURL, _ := nextPageURL(body, sourceURL)
-	return items, sourceURL, nextURL, nil
+	return body, sourceURL, resp.Header.Get("Content-Type"), nil
 }
 
 func parseFeed(body []byte, sourceURL string) ([]Item, error) {
