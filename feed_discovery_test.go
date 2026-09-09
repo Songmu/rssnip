@@ -201,6 +201,55 @@ func TestRunDiscoveryReturnsFirstCandidateFailure(t *testing.T) {
 	}
 }
 
+func TestDiscoveryIgnoresTemplateContents(t *testing.T) {
+	t.Parallel()
+	body := []byte(`<html><head>
+	  <template><base href="/wrong/"><link rel="feed" href="/placeholder">
+	    <template><base href="/also-wrong/"><link rel="feed" href="/nested"></template>
+	  </template>
+	  <link rel="feed" href="feed.xml"><base href="/correct/">
+	</head></html>`)
+	got, ok := discoverFeedURL(body, "https://example.com/blog/", "text/html")
+	if !ok || got != "https://example.com/correct/feed.xml" {
+		t.Errorf("discovery = %q, %v", got, ok)
+	}
+}
+
+func TestDiscoverySkipsEquivalentSourceURLs(t *testing.T) {
+	t.Parallel()
+	for _, source := range []string{"http://example.com/blog", "https://example.com/blog"} {
+		port := "80"
+		if strings.HasPrefix(source, "https:") {
+			port = "443"
+		}
+		equivalent := strings.Replace(source, "example.com", "EXAMPLE.COM:"+port, 1)
+		body := []byte(`<html><link rel="feed" href="` + equivalent + `#rss"><link rel="feed" href="/actual"></html>`)
+		got, ok := discoverFeedURL(body, source, "text/html")
+		want := strings.TrimSuffix(source, "/blog") + "/actual"
+		if !ok || got != want {
+			t.Errorf("discovery = %q, %v, want %q", got, ok, want)
+		}
+	}
+	for _, value := range []string{"HTTP://[::1]:80/blog#rss", "http://[::1]/blog"} {
+		if got := discoveryFetchURL(value); got != "http://[::1]/blog" {
+			t.Errorf("normalized %q = %q", value, got)
+		}
+	}
+}
+
+func TestDiscoverySniffsHTMLWithOmittedTags(t *testing.T) {
+	t.Parallel()
+	for _, prefix := range []string{
+		"", "<title>Blog</title>", `<meta charset="utf-8">`, "<!-- generated -->\n",
+	} {
+		body := []byte(prefix + `<link rel="feed" href="/rss">`)
+		got, ok := discoverFeedURL(body, "https://example.com/blog/", "text/plain")
+		if !ok || got != "https://example.com/rss" {
+			t.Errorf("discovery for %q = %q, %v", prefix, got, ok)
+		}
+	}
+}
+
 func TestHelpDescribesBlogURLInputs(t *testing.T) {
 	t.Parallel()
 	var stdout, stderr bytes.Buffer

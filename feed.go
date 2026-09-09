@@ -236,31 +236,30 @@ func discoverFeedURL(body []byte, sourceURL, contentType string) (string, bool) 
 	}
 	tokenizer = html.NewTokenizer(reader)
 	sourceFetchURL := discoveryFetchURL(sourceURL)
+	templateDepth := 0
 	for {
-		switch tokenizer.Next() {
-		case html.ErrorToken:
+		token, ok := nextDocumentTag(tokenizer, &templateDepth)
+		if !ok {
 			return "", false
-		case html.StartTagToken, html.SelfClosingTagToken:
-			token := tokenizer.Token()
-			switch token.DataAtom {
-			case htmlatom.Link:
-				rel := strings.ToLower(tokenAttr(token, "rel"))
-				isAlternate := hasRel(rel, "alternate")
-				isFeed := hasRel(rel, "feed")
-				if !isAlternate && !isFeed {
-					continue
-				}
-				href := strings.TrimSpace(tokenAttr(token, "href"))
-				if href == "" {
-					continue
-				}
-				linkType := tokenAttr(token, "type")
-				title := tokenAttr(token, "title")
-				if isFeed || isFeedMediaType(linkType) || looksLikeFeedPath(href) || hasFeedHint(title, "rss", "atom") {
-					resolved := discoveryFetchURL(resolveURL(baseURL, href))
-					if resolved != sourceFetchURL && isDiscoverableFeedURL(resolved) {
-						return resolved, true
-					}
+		}
+		switch token.DataAtom {
+		case htmlatom.Link:
+			rel := strings.ToLower(tokenAttr(token, "rel"))
+			isAlternate := hasRel(rel, "alternate")
+			isFeed := hasRel(rel, "feed")
+			if !isAlternate && !isFeed {
+				continue
+			}
+			href := strings.TrimSpace(tokenAttr(token, "href"))
+			if href == "" {
+				continue
+			}
+			linkType := tokenAttr(token, "type")
+			title := tokenAttr(token, "title")
+			if isFeed || isFeedMediaType(linkType) || looksLikeFeedPath(href) || hasFeedHint(title, "rss", "atom") {
+				resolved := discoveryFetchURL(resolveURL(baseURL, href))
+				if resolved != sourceFetchURL && isDiscoverableFeedURL(resolved) {
+					return resolved, true
 				}
 			}
 		}
@@ -273,26 +272,50 @@ func discoveryBaseURL(tokenizer *html.Tokenizer, sourceURL string) string {
 	if err != nil {
 		return sourceURL
 	}
+	templateDepth := 0
 	for {
-		switch tokenizer.Next() {
-		case html.ErrorToken:
+		token, ok := nextDocumentTag(tokenizer, &templateDepth)
+		if !ok {
 			return sourceURL
-		case html.StartTagToken, html.SelfClosingTagToken:
+		}
+		if token.DataAtom != htmlatom.Base {
+			continue
+		}
+		href := strings.TrimSpace(tokenAttr(token, "href"))
+		if href == "" {
+			continue
+		}
+		reference, err := url.Parse(href)
+		if err != nil {
+			continue
+		}
+		resolved := pageURL.ResolveReference(reference)
+		if resolved.IsAbs() {
+			return resolved.String()
+		}
+	}
+}
+
+func nextDocumentTag(tokenizer *html.Tokenizer, templateDepth *int) (html.Token, bool) {
+	for {
+		kind := tokenizer.Next()
+		switch kind {
+		case html.ErrorToken:
+			return html.Token{}, false
+		case html.StartTagToken, html.SelfClosingTagToken, html.EndTagToken:
 			token := tokenizer.Token()
-			if token.DataAtom != htmlatom.Base {
+			if token.DataAtom == htmlatom.Template {
+				if kind == html.EndTagToken {
+					if *templateDepth > 0 {
+						*templateDepth--
+					}
+				} else {
+					*templateDepth++
+				}
 				continue
 			}
-			href := strings.TrimSpace(tokenAttr(token, "href"))
-			if href == "" {
-				continue
-			}
-			reference, err := url.Parse(href)
-			if err != nil {
-				continue
-			}
-			resolved := pageURL.ResolveReference(reference)
-			if resolved.IsAbs() {
-				return resolved.String()
+			if kind != html.EndTagToken && *templateDepth == 0 {
+				return token, true
 			}
 		}
 	}
@@ -304,6 +327,15 @@ func discoveryFetchURL(value string) string {
 		return value
 	}
 	parsed.Fragment, parsed.RawFragment = "", ""
+	parsed.Host = strings.ToLower(parsed.Host)
+	if (parsed.Scheme == "http" && parsed.Port() == "80") ||
+		(parsed.Scheme == "https" && parsed.Port() == "443") {
+		host := parsed.Hostname()
+		if strings.Contains(host, ":") {
+			host = "[" + host + "]"
+		}
+		parsed.Host = host
+	}
 	// HTTP requests for an empty path target "/", too.
 	if parsed.Path == "" {
 		parsed.Path = "/"
@@ -328,12 +360,33 @@ func looksLikeHTML(body []byte, contentType string) bool {
 		}
 	}
 	trimmed := bytes.TrimSpace(bytes.TrimPrefix(bytes.TrimSpace(body), []byte("\xef\xbb\xbf")))
-	lower := bytes.ToLower(trimmed)
-	return bytes.HasPrefix(lower, []byte("<!doctype html")) ||
-		bytes.HasPrefix(lower, []byte("<!--")) ||
-		bytes.HasPrefix(lower, []byte("<html")) ||
-		bytes.HasPrefix(lower, []byte("<head")) ||
-		bytes.HasPrefix(lower, []byte("<?xml-stylesheet"))
+	tokenizer := html.NewTokenizer(bytes.NewReader(trimmed))
+	for {
+		switch tokenizer.Next() {
+		case html.ErrorToken:
+			return false
+		case html.CommentToken:
+			continue
+		case html.TextToken:
+			if len(bytes.TrimSpace(tokenizer.Text())) == 0 {
+				continue
+			}
+			return false
+		case html.DoctypeToken:
+			return strings.EqualFold(tokenizer.Token().Data, "html")
+		case html.StartTagToken, html.SelfClosingTagToken:
+			switch tokenizer.Token().DataAtom {
+			case htmlatom.Html, htmlatom.Head, htmlatom.Body, htmlatom.Title,
+				htmlatom.Meta, htmlatom.Link, htmlatom.Base, htmlatom.Template,
+				htmlatom.Script, htmlatom.Style, htmlatom.Noscript:
+				return true
+			default:
+				return false
+			}
+		default:
+			return false
+		}
+	}
 }
 
 func hasRel(rel, want string) bool {
