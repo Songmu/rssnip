@@ -233,3 +233,44 @@ func TestDiscoveryDoesNotFollowHTMLPagination(t *testing.T) {
 		})
 	}
 }
+
+func TestDiscoveryAcceptsUppercaseSchemes(t *testing.T) {
+	t.Parallel()
+	for _, scheme := range []string{"HTTP", "HTTPS", "hTtPs"} {
+		href := scheme + "://example.com/feed.xml"
+		got, ok := discoverFeedURL([]byte(`<html><link rel="feed" href="`+href+`"></html>`),
+			"https://example.com/blog/", "text/html")
+		if !ok || got != strings.ToLower(scheme)+"://example.com/feed.xml" {
+			t.Errorf("discovery for %q = %q, %v", href, got, ok)
+		}
+		if !isDiscoverableFeedURL(href) {
+			t.Errorf("valid scheme rejected: %q", href)
+		}
+	}
+	feed := mustReadTestdata(t, "sample_rss.xml")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/blog":
+			w.Header().Set("Content-Type", "text/html")
+			fmt.Fprintf(w, `<html><link rel="feed" href="HTTP://%s/feed.xml"></html>`, r.Host)
+		case "/feed.xml":
+			w.Header().Set("Content-Type", "application/rss+xml")
+			w.Write(feed)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	for _, input := range []string{
+		server.URL + "/blog",
+		strings.Replace(server.URL, "http:", "HTTP:", 1) + "/feed.xml",
+	} {
+		var stdout, stderr bytes.Buffer
+		if err := run(context.Background(), []string{input}, strings.NewReader(""), &stdout, &stderr); err != nil {
+			t.Fatalf("run %q: %v", input, err)
+		}
+		if stdout.Len() == 0 {
+			t.Errorf("no items for %q", input)
+		}
+	}
+}
