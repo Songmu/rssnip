@@ -65,8 +65,10 @@ a feed-like filename/path token, or a standalone RSS/Atom word in its title.
 Fragments are removed from candidate URLs; links back to the same HTML document
 are skipped.
 The first `<base href>` applies to all links, even when its value is empty.
+If that base URL is malformed, links resolve against the page URL instead.
 HTML decoding uses HTTP charset or HTML metadata; XHTML decoding uses the BOM,
-HTTP charset, or XML declaration, defaulting to UTF-8.
+HTTP charset, or XML declaration, defaulting to UTF-8. XHTML uses XML tokenization
+and the XHTML namespace; template contents are ignored in both formats.
 If the selected URL fails to fetch or parse as a feed, the error is returned;
 later candidates are not retried. Pagination of the selected feed follows the
 same rules as a direct feed URL.

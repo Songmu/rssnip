@@ -227,13 +227,13 @@ func discoverFeedURL(body []byte, sourceURL, contentType string) (string, bool) 
 	if err != nil {
 		return "", false
 	}
-	tokenizer := html.NewTokenizer(reader)
+	tokenizer := newDiscoveryTokenizer(reader, contentType)
 	baseURL := discoveryBaseURL(tokenizer, sourceURL)
 	reader, err = discoveryReader(body, contentType)
 	if err != nil {
 		return "", false
 	}
-	tokenizer = html.NewTokenizer(reader)
+	tokenizer = newDiscoveryTokenizer(reader, contentType)
 	sourceFetchURL := discoveryFetchURL(sourceURL)
 	templateDepth := 0
 	for {
@@ -295,7 +295,7 @@ func discoveryReader(body []byte, contentType string) (io.Reader, error) {
 }
 
 // A document's base applies even to links that precede the base element.
-func discoveryBaseURL(tokenizer *html.Tokenizer, sourceURL string) string {
+func discoveryBaseURL(tokenizer *discoveryTokenizer, sourceURL string) string {
 	pageURL, err := url.Parse(sourceURL)
 	if err != nil {
 		return sourceURL
@@ -315,23 +315,79 @@ func discoveryBaseURL(tokenizer *html.Tokenizer, sourceURL string) string {
 		}
 		reference, err := url.Parse(strings.TrimSpace(href))
 		if err != nil {
-			continue
+			return sourceURL
 		}
 		resolved := pageURL.ResolveReference(reference)
 		if resolved.IsAbs() {
 			return resolved.String()
 		}
+		return sourceURL
 	}
 }
 
-func nextDocumentTag(tokenizer *html.Tokenizer, templateDepth *int) (html.Token, bool) {
+type discoveryTokenizer struct {
+	html *html.Tokenizer
+	xml  *xml.Decoder
+}
+
+func newDiscoveryTokenizer(reader io.Reader, contentType string) *discoveryTokenizer {
+	mediaType, _, _ := mime.ParseMediaType(contentType)
+	if mediaType != "application/xhtml+xml" {
+		return &discoveryTokenizer{html: html.NewTokenizer(reader)}
+	}
+	decoder := xml.NewDecoder(reader)
+	// discoveryReader already transcoded the original XML encoding to UTF-8.
+	decoder.CharsetReader = func(_ string, input io.Reader) (io.Reader, error) {
+		return input, nil
+	}
+	return &discoveryTokenizer{xml: decoder}
+}
+
+func (tokenizer *discoveryTokenizer) next() (html.TokenType, html.Token) {
+	if tokenizer.html != nil {
+		kind := tokenizer.html.Next()
+		if kind == html.StartTagToken || kind == html.SelfClosingTagToken || kind == html.EndTagToken {
+			return kind, tokenizer.html.Token()
+		}
+		return kind, html.Token{}
+	}
 	for {
-		kind := tokenizer.Next()
+		value, err := tokenizer.xml.Token()
+		if err != nil {
+			return html.ErrorToken, html.Token{}
+		}
+		var name xml.Name
+		var attributes []xml.Attr
+		kind := html.StartTagToken
+		switch element := value.(type) {
+		case xml.StartElement:
+			name, attributes = element.Name, element.Attr
+		case xml.EndElement:
+			name = element.Name
+			kind = html.EndTagToken
+		default:
+			continue
+		}
+		if name.Space != "http://www.w3.org/1999/xhtml" {
+			continue
+		}
+		token := html.Token{Type: kind, Data: name.Local, DataAtom: htmlatom.Lookup([]byte(name.Local))}
+		for _, attribute := range attributes {
+			if attribute.Name.Space == "" {
+				token.Attr = append(token.Attr, html.Attribute{Key: attribute.Name.Local, Val: attribute.Value})
+			}
+		}
+		return kind, token
+	}
+}
+
+func nextDocumentTag(tokenizer *discoveryTokenizer, templateDepth *int) (html.Token, bool) {
+	for {
+		kind, token := tokenizer.next()
 		switch kind {
 		case html.ErrorToken:
 			return html.Token{}, false
 		case html.StartTagToken, html.SelfClosingTagToken, html.EndTagToken:
-			token := tokenizer.Token()
 			if token.DataAtom == htmlatom.Template {
 				if kind == html.EndTagToken {
 					if *templateDepth > 0 {

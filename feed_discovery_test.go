@@ -175,6 +175,44 @@ func TestDiscoveryXHTMLEncoding(t *testing.T) {
 	}
 }
 
+func TestDiscoveryMalformedFirstBase(t *testing.T) {
+	t.Parallel()
+	body := []byte(`<html><base href="%zz"><base href="https://other.example/">
+	  <link rel="feed" href="feed.xml"></html>`)
+	got, ok := discoverFeedURL(body, "https://example.com/blog/index.html", "text/html")
+	if !ok || got != "https://example.com/blog/feed.xml" {
+		t.Errorf("discovery = %q, %v", got, ok)
+	}
+}
+
+func TestDiscoveryXHTMLUsesXMLTokens(t *testing.T) {
+	t.Parallel()
+	for _, prefix := range []string{
+		`<template/>`,
+		`<template><template/></template>`,
+		`<script/>`,
+		`<template><base href="/wrong/"/><link rel="feed" href="/wrong"/></template>`,
+		`<svg xmlns="http://www.w3.org/2000/svg"><link rel="feed" href="/wrong"/></svg>`,
+	} {
+		body := []byte(`<html xmlns="http://www.w3.org/1999/xhtml"><head>` + prefix +
+			`<link rel="feed" href="rss"/><base href="/correct/"/></head></html>`)
+		got, ok := discoverFeedURL(body, "https://example.com/blog/", "application/xhtml+xml")
+		if !ok || got != "https://example.com/correct/rss" {
+			t.Errorf("prefix %q: discovery = %q, %v", prefix, got, ok)
+		}
+	}
+	body := []byte(`<h:html xmlns:h="http://www.w3.org/1999/xhtml"><h:head>
+	  <h:template/><h:link rel="feed" href="/rss"/></h:head></h:html>`)
+	if got, ok := discoverFeedURL(body, "https://example.com/", "application/xhtml+xml"); !ok || got != "https://example.com/rss" {
+		t.Errorf("namespaced discovery = %q, %v", got, ok)
+	}
+	body = []byte(`<html><head><template/><link rel="feed" href="/hidden"></template>
+	  <link rel="feed" href="/rss"></head></html>`)
+	if got, ok := discoverFeedURL(body, "https://example.com/", "text/html"); !ok || got != "https://example.com/rss" {
+		t.Errorf("HTML template recovery = %q, %v", got, ok)
+	}
+}
+
 func TestDiscoveryRecognizesLeadingHTMLComments(t *testing.T) {
 	t.Parallel()
 	for _, prefix := range []string{"<!-- generated -->", "\xef\xbb\xbf\n<!-- generated -->\n"} {
