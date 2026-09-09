@@ -168,8 +168,8 @@ https://example.com/go-article
 ### Initial scope
 
 The initial release focuses on direct feed retrieval and HTML feed discovery.
-Feed pagination, conditional requests, persistent caching, and natural-language
-date expressions are intentionally outside its scope.
+Conditional requests, persistent caching, and natural-language date expressions
+are intentionally outside its scope.
 
 ## Installation
 

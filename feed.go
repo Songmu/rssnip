@@ -287,7 +287,7 @@ func looksLikeHTML(body []byte, contentType string) bool {
 			return true
 		}
 	}
-	trimmed := bytes.TrimSpace(body)
+	trimmed := bytes.TrimPrefix(bytes.TrimSpace(body), []byte("\xef\xbb\xbf"))
 	lower := bytes.ToLower(trimmed)
 	return bytes.HasPrefix(lower, []byte("<!doctype html")) ||
 		bytes.HasPrefix(lower, []byte("<html")) ||
