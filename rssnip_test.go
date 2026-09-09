@@ -26,6 +26,37 @@ func TestRunFiltersAndAppliesRawJQ(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	func TestRunDiscoversFeedFromBlogURL(t *testing.T) {
+		t.Parallel()
+		testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if got := r.Header.Get("User-Agent"); !strings.HasPrefix(got, "rssnip/") {
+				t.Errorf("User-Agent = %q", got)
+			}
+			switch r.URL.Path {
+			case "/":
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				fmt.Fprintf(w, `<html><head><link rel="alternate" type="application/rss+xml" href="/feeds/index.xml"></head></html>`)
+			case "/feeds/index.xml":
+				w.Header().Set("Content-Type", "application/rss+xml")
+				fmt.Fprint(w, testRSS)
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		t.Cleanup(server.Close)
+
+		var stdout, stderr bytes.Buffer
+		err := Run(context.Background(), []string{"--url", server.URL, "--with-feed", "--jq", "._feed.feed_url", "-r"}, &stdout, &stderr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := strings.Repeat(server.URL+"/feeds/index.xml\n", 4)
+		if got := stdout.String(); got != want {
+			t.Errorf("stdout = %q, want %q", got, want)
+		}
+	}
 	want := "https://example.com/first\nhttps://example.com/second\n"
 	if got := stdout.String(); got != want {
 		t.Errorf("stdout = %q, want %q", got, want)

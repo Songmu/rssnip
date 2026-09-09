@@ -18,6 +18,8 @@ import (
 
 	"github.com/mmcdole/gofeed"
 	"github.com/mmcdole/gofeed/atom"
+	"golang.org/x/net/html"
+	htmlatom "golang.org/x/net/html/atom"
 )
 
 const userAgent = "rssnip/" + version
@@ -109,9 +111,29 @@ func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item
 	if parsedURL.User != nil {
 		return nil, fmt.Errorf("invalid feed URL %q: userinfo is not allowed", displayURL(feedURL))
 	}
+	body, sourceURL, contentType, err := fetchFeedDocument(ctx, client, feedURL)
+	if err != nil {
+		return nil, err
+	}
+	items, parseErr := parseFeed(body, sourceURL)
+	if parseErr == nil {
+		return items, nil
+	}
+	discoveredURL, ok := discoverFeedURL(body, sourceURL, contentType)
+	if !ok {
+		return nil, parseErr
+	}
+	body, sourceURL, _, err = fetchFeedDocument(ctx, client, discoveredURL)
+	if err != nil {
+		return nil, err
+	}
+	return parseFeed(body, sourceURL)
+}
+
+func fetchFeedDocument(ctx context.Context, client *http.Client, feedURL string) ([]byte, string, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create request for %q: %w", displayURL(feedURL), err)
+		return nil, "", "", fmt.Errorf("create request for %q: %w", displayURL(feedURL), err)
 	}
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "application/feed+json, application/json, application/atom+xml, application/rss+xml, application/rdf+xml, application/xml, text/xml, */*;q=0.1")
@@ -124,29 +146,158 @@ func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item
 			redacted.URL = displayURL(redacted.URL)
 			err = &redacted
 		}
-		return nil, fmt.Errorf("fetch %q: %w", displayURL(feedURL), err)
+		return nil, "", "", fmt.Errorf("fetch %q: %w", displayURL(feedURL), err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-		return nil, fmt.Errorf("fetch %q: unexpected HTTP status %s", displayURL(feedURL), resp.Status)
+		return nil, "", "", fmt.Errorf("fetch %q: unexpected HTTP status %s", displayURL(feedURL), resp.Status)
 	}
 	if resp.ContentLength > maxFeedSize {
-		return nil, fmt.Errorf("read %q: feed exceeds %d MiB limit", displayURL(feedURL), maxFeedSize>>20)
+		return nil, "", "", fmt.Errorf("read %q: feed exceeds %d MiB limit", displayURL(feedURL), maxFeedSize>>20)
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxFeedSize+1))
 	if err != nil {
-		return nil, fmt.Errorf("read %q: %w", displayURL(feedURL), err)
+		return nil, "", "", fmt.Errorf("read %q: %w", displayURL(feedURL), err)
 	}
 	if len(body) > maxFeedSize {
-		return nil, fmt.Errorf("read %q: feed exceeds %d MiB limit", displayURL(feedURL), maxFeedSize>>20)
+		return nil, "", "", fmt.Errorf("read %q: feed exceeds %d MiB limit", displayURL(feedURL), maxFeedSize>>20)
 	}
 	sourceURL := feedURL
 	if resp.Request != nil && resp.Request.URL != nil {
 		sourceURL = resp.Request.URL.String()
 	}
 	sourceURL = displayURL(sourceURL)
-	return parseFeed(body, sourceURL)
+	return body, sourceURL, resp.Header.Get("Content-Type"), nil
+}
+
+func discoverFeedURL(body []byte, sourceURL, contentType string) (string, bool) {
+	if !looksLikeHTML(body, contentType) {
+		return "", false
+	}
+	root, err := html.Parse(bytes.NewReader(body))
+	if err != nil {
+		return "", false
+	}
+	for _, href := range feedLinkHrefs(root) {
+		resolved := resolveURL(sourceURL, href)
+		if isDiscoverableFeedURL(resolved) {
+			return resolved, true
+		}
+	}
+	return "", false
+}
+
+func looksLikeHTML(body []byte, contentType string) bool {
+	if mediaType, _, err := mime.ParseMediaType(contentType); err == nil {
+		switch strings.ToLower(mediaType) {
+		case "text/html", "application/xhtml+xml":
+			return true
+		}
+	}
+	trimmed := bytes.TrimSpace(body)
+	lower := bytes.ToLower(trimmed)
+	return bytes.HasPrefix(lower, []byte("<!doctype html")) ||
+		bytes.HasPrefix(lower, []byte("<html")) ||
+		bytes.HasPrefix(lower, []byte("<head")) ||
+		bytes.HasPrefix(lower, []byte("<?xml-stylesheet"))
+}
+
+func feedLinkHrefs(root *html.Node) []string {
+	links := make([]string, 0, 4)
+	var walk func(*html.Node)
+	walk = func(node *html.Node) {
+		if node == nil {
+			return
+		}
+		if node.Type == html.ElementNode && node.DataAtom == htmlatom.Link {
+			rel := strings.ToLower(attrValue(node, "rel"))
+			if !hasRel(rel, "alternate") && !hasRel(rel, "feed") {
+				goto NEXT
+			}
+			href := strings.TrimSpace(attrValue(node, "href"))
+			if href == "" {
+				goto NEXT
+			}
+			linkType := attrValue(node, "type")
+			title := strings.ToLower(attrValue(node, "title"))
+			if isFeedMediaType(linkType) || looksLikeFeedPath(href) || strings.Contains(title, "rss") || strings.Contains(title, "atom") {
+				links = append(links, href)
+			}
+		}
+	NEXT:
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(root)
+	return links
+}
+
+func attrValue(node *html.Node, name string) string {
+	for _, attr := range node.Attr {
+		if strings.EqualFold(attr.Key, name) {
+			return attr.Val
+		}
+	}
+	return ""
+}
+
+func hasRel(rel, want string) bool {
+	for _, token := range strings.Fields(rel) {
+		if token == want {
+			return true
+		}
+	}
+	return false
+}
+
+func isFeedMediaType(contentType string) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		mediaType = contentType
+	}
+	switch strings.ToLower(mediaType) {
+	case "application/feed+json",
+		"application/json",
+		"application/atom+xml",
+		"application/rss+xml",
+		"application/rdf+xml",
+		"application/xml",
+		"text/xml":
+		return true
+	default:
+		return false
+	}
+}
+
+func looksLikeFeedPath(href string) bool {
+	parsed, err := url.Parse(href)
+	if err != nil {
+		return false
+	}
+	candidate := parsed.Path
+	if candidate == "" {
+		candidate = href
+	}
+	lower := strings.ToLower(candidate)
+	return strings.HasSuffix(lower, ".xml") ||
+		strings.HasSuffix(lower, ".rss") ||
+		strings.HasSuffix(lower, ".rdf") ||
+		strings.HasSuffix(lower, ".atom") ||
+		strings.HasSuffix(lower, ".json") ||
+		strings.Contains(lower, "feed")
+}
+
+func isDiscoverableFeedURL(value string) bool {
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	if parsed.User != nil {
+		return false
+	}
+	return parsed.Scheme == "http" || parsed.Scheme == "https"
 }
 
 func parseFeed(body []byte, sourceURL string) ([]Item, error) {

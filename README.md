@@ -54,7 +54,9 @@ are ignored; changing a supported field changes the generated identifier.
 Every item is emitted as one compact JSON object per line. Feed URLs may be
 supplied by repeating `--url`, as positional arguments, one per line on
 standard input, or by combining any of these forms; output preserves feed and
-item order.
+item order. When a blog or site URL is provided, `rssnip` also tries to
+discover linked feeds from HTML `<link rel="alternate">` entries and then
+fetches those feeds.
 
 ### Output schema
 
@@ -153,8 +155,8 @@ https://example.com/go-article
 
 ### Initial scope
 
-The initial release fetches explicit feed URLs. HTML feed discovery, feed
-pagination, conditional requests, persistent caching, and natural-language
+The initial release focuses on direct feed retrieval and HTML feed discovery.
+Feed pagination, conditional requests, persistent caching, and natural-language
 date expressions are intentionally outside its scope.
 
 ## Installation
