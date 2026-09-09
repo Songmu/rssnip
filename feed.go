@@ -335,7 +335,7 @@ func looksLikeFeedPath(href string) bool {
 		strings.HasSuffix(lower, ".rdf") ||
 		strings.HasSuffix(lower, ".atom") ||
 		strings.HasSuffix(lower, ".json") ||
-		hasFeedHint(lower, "feed")
+		hasFeedHint(lower, "feed", "rss", "atom")
 }
 
 func hasFeedHint(value string, hints ...string) bool {

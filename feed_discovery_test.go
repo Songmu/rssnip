@@ -60,6 +60,10 @@ func TestDiscoverFeedURLHints(t *testing.T) {
 		want       bool
 	}{
 		{"feed segment", `<link rel="alternate" href="/blog/feed/">`, true},
+		{"RSS segment", `<link rel="alternate" href="/rss">`, true},
+		{"Atom segment", `<link rel="alternate" href="/atom">`, true},
+		{"nested RSS segment", `<link rel="alternate" href="/blog/RSS/">`, true},
+		{"RSS suffix token", `<link rel="alternate" href="/blog-rss">`, true},
 		{"feed suffix token", `<link rel="alternate" href="/blog-feed">`, true},
 		{"extension", `<link rel="alternate" href="/index.XML">`, true},
 		{"RSS title", `<link rel="alternate" href="/updates" title="Blog (RSS)">`, true},
@@ -68,6 +72,8 @@ func TestDiscoverFeedURLHints(t *testing.T) {
 		{"explicit media type", `<link rel="alternate" href="/updates" type="application/atom+xml">`, true},
 		{"feedback", `<link rel="alternate" href="/feedback">`, false},
 		{"newsfeed", `<link rel="alternate" href="/newsfeed">`, false},
+		{"anatomy path", `<link rel="alternate" href="/anatomy">`, false},
+		{"RSSReader path", `<link rel="alternate" href="/RSSReader">`, false},
 		{"anatomy", `<link rel="alternate" href="/updates" title="Anatomy">`, false},
 		{"title suffix", `<link rel="alternate" href="/updates" title="RSSReader">`, false},
 		{"hostname", `<link rel="alternate" href="https://feed.example.com">`, false},
