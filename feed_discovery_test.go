@@ -104,6 +104,29 @@ func TestDiscoveryCandidateFragmentUsesHTMLBase(t *testing.T) {
 	}
 }
 
+func TestDiscoveryUsesFirstBaseRegardlessOfFetchability(t *testing.T) {
+	t.Parallel()
+	for _, base := range []string{
+		"ftp://example.com/assets/",
+		"https://user:password@example.com/assets/",
+	} {
+		t.Run(base, func(t *testing.T) {
+			body := `<html><head><base href="` + base + `">
+			  <base href="https://example.com/incorrect/">
+			  <link rel="feed" href="relative.xml">
+			</head></html>`
+			if got, ok := discoverFeedURL([]byte(body), "https://example.com/blog/", "text/html"); ok {
+				t.Errorf("non-fetchable base should not fall back to page/later base: %q", got)
+			}
+			body = strings.Replace(body, "</head>", `<link rel="feed" href="https://example.com/correct.xml"></head>`, 1)
+			got, ok := discoverFeedURL([]byte(body), "https://example.com/blog/", "text/html")
+			if !ok || got != "https://example.com/correct.xml" {
+				t.Errorf("absolute fetchable candidate = %q, %v", got, ok)
+			}
+		})
+	}
+}
+
 func TestRunDiscoveryReturnsFirstCandidateFailure(t *testing.T) {
 	t.Parallel()
 	for _, failure := range []string{"fetch", "parse"} {

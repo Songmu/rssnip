@@ -244,9 +244,14 @@ func discoverFeedURL(body []byte, sourceURL, contentType string) (string, bool) 
 				if href == "" {
 					continue
 				}
-				resolved := resolveURL(sourceURL, href)
-				if isDiscoverableFeedURL(resolved) {
-					baseURL = resolved
+				pageURL, pageErr := url.Parse(sourceURL)
+				reference, referenceErr := url.Parse(href)
+				if pageErr != nil || referenceErr != nil {
+					continue
+				}
+				resolved := pageURL.ResolveReference(reference)
+				if resolved.IsAbs() {
+					baseURL = resolved.String()
 					baseResolved = true
 				}
 			case htmlatom.Link:
