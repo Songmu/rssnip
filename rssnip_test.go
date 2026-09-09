@@ -275,6 +275,7 @@ func TestRunErrors(t *testing.T) {
 		{"relative URL", []string{"feed.xml"}, "invalid feed URL"},
 		{"non-HTTP URL", []string{"ftp://example.com/feed"}, "invalid feed URL"},
 		{"credential URL", []string{"http://user:" + "password@example.com/feed"}, "userinfo is not allowed"},
+		{"zero max pages", []string{"--max-pages", "0", "https://example.com/feed"}, "--max-pages must be at least 1"},
 	}
 	for _, tt := range tests {
 		tt := tt

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -20,10 +21,12 @@ import (
 	"github.com/mmcdole/gofeed/atom"
 	"golang.org/x/net/html"
 	htmlatom "golang.org/x/net/html/atom"
+	"golang.org/x/net/html/charset"
 )
 
 const userAgent = "rssnip/" + version
 const maxFeedSize = 32 << 20
+const defaultMaxPages = 10
 
 // Item is a feed entry normalized to the JSON Feed 1.1 item shape.
 type Item struct {
@@ -71,6 +74,7 @@ type jsonFeed struct {
 	Authors     []Author       `json:"authors"`
 	Author      *Author        `json:"author"`
 	Items       []jsonFeedItem `json:"items"`
+	NextURL     string         `json:"next_url"`
 }
 
 type jsonFeedItem struct {
@@ -100,37 +104,74 @@ type jsonFeedAttachment struct {
 }
 
 func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item, error) {
+	return fetchFeedPages(ctx, client, feedURL, defaultMaxPages)
+}
+
+func fetchFeedPages(ctx context.Context, client *http.Client, feedURL string, maxPages int) ([]Item, error) {
+	items := make([]Item, 0)
+	seenItems := make(map[string]struct{})
+	seenURLs := make(map[string]struct{})
+	nextURL := feedURL
+	for page := 0; page < maxPages && nextURL != ""; page++ {
+		nextURL = paginationURL(nextURL)
+		if _, ok := seenURLs[nextURL]; ok {
+			break
+		}
+		seenURLs[nextURL] = struct{}{}
+
+		pageItems, sourceURL, followingURL, err := fetchFeedPage(ctx, client, nextURL)
+		if err != nil {
+			return nil, err
+		}
+		seenURLs[paginationURL(sourceURL)] = struct{}{}
+		for _, item := range pageItems {
+			if _, ok := seenItems[item.ID]; ok {
+				continue
+			}
+			seenItems[item.ID] = struct{}{}
+			items = append(items, item)
+		}
+		nextURL = followingURL
+	}
+	return items, nil
+}
+
+func fetchFeedPage(ctx context.Context, client *http.Client, feedURL string) ([]Item, string, string, error) {
+	body, sourceURL, contentType, err := fetchFeedDocument(ctx, client, feedURL)
+	if err != nil {
+		return nil, "", "", err
+	}
+	items, parseErr := parseFeed(body, sourceURL)
+	if parseErr != nil {
+		discoveredURL, ok := discoverFeedURL(body, sourceURL, contentType)
+		if !ok {
+			return nil, "", "", parseErr
+		}
+		body, sourceURL, _, err = fetchFeedDocument(ctx, client, discoveredURL)
+		if err != nil {
+			return nil, "", "", err
+		}
+		items, err = parseFeed(body, sourceURL)
+		if err != nil {
+			return nil, "", "", err
+		}
+	}
+	nextURL, _ := nextPageURL(body, sourceURL)
+	return items, sourceURL, nextURL, nil
+}
+
+func fetchFeedDocument(ctx context.Context, client *http.Client, feedURL string) ([]byte, string, string, error) {
 	parsedURL, err := url.ParseRequestURI(feedURL)
 	if err != nil || parsedURL.Host == "" ||
 		(parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
 		if err == nil {
 			err = fmt.Errorf("must be an absolute HTTP or HTTPS URL")
 		}
-		return nil, fmt.Errorf("invalid feed URL %q: %w", displayURL(feedURL), err)
+		return nil, "", "", fmt.Errorf("invalid feed URL %q: %w", displayURL(feedURL), err)
 	}
 	if parsedURL.User != nil {
-		return nil, fmt.Errorf("invalid feed URL %q: userinfo is not allowed", displayURL(feedURL))
+		return nil, "", "", fmt.Errorf("invalid feed URL %q: userinfo is not allowed", displayURL(feedURL))
 	}
-	body, sourceURL, contentType, err := fetchFeedDocument(ctx, client, feedURL)
-	if err != nil {
-		return nil, err
-	}
-	items, parseErr := parseFeed(body, sourceURL)
-	if parseErr == nil {
-		return items, nil
-	}
-	discoveredURL, ok := discoverFeedURL(body, sourceURL, contentType)
-	if !ok {
-		return nil, parseErr
-	}
-	body, sourceURL, _, err = fetchFeedDocument(ctx, client, discoveredURL)
-	if err != nil {
-		return nil, err
-	}
-	return parseFeed(body, sourceURL)
-}
-
-func fetchFeedDocument(ctx context.Context, client *http.Client, feedURL string) ([]byte, string, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("create request for %q: %w", displayURL(feedURL), err)
@@ -171,50 +212,72 @@ func fetchFeedDocument(ctx context.Context, client *http.Client, feedURL string)
 	return body, sourceURL, resp.Header.Get("Content-Type"), nil
 }
 
+// discoverFeedURL scans an HTML document for a feed link, without building a
+// full DOM, to bound both memory and stack usage for adversarial input. It
+// decodes the document using the charset declared by the HTTP Content-Type
+// header or HTML metadata before scanning for <base> and <link> elements.
 func discoverFeedURL(body []byte, sourceURL, contentType string) (string, bool) {
 	if !looksLikeHTML(body, contentType) {
 		return "", false
 	}
-	root, err := html.Parse(bytes.NewReader(body))
+	reader, err := charset.NewReader(bytes.NewReader(body), contentType)
 	if err != nil {
 		return "", false
 	}
+	tokenizer := html.NewTokenizer(reader)
 	baseURL := sourceURL
-	if resolved, ok := htmlBaseURL(root, sourceURL); ok {
-		baseURL = resolved
-	}
-	for _, href := range feedLinkHrefs(root) {
-		resolved := resolveURL(baseURL, href)
-		if isDiscoverableFeedURL(resolved) {
-			return resolved, true
-		}
-	}
-	return "", false
-}
-
-func htmlBaseURL(root *html.Node, sourceURL string) (string, bool) {
-	var walk func(*html.Node) (string, bool)
-	walk = func(node *html.Node) (string, bool) {
-		if node == nil {
+	baseResolved := false
+	for {
+		switch tokenizer.Next() {
+		case html.ErrorToken:
 			return "", false
-		}
-		if node.Type == html.ElementNode && node.DataAtom == htmlatom.Base {
-			href := strings.TrimSpace(attrValue(node, "href"))
-			if href != "" {
+		case html.StartTagToken, html.SelfClosingTagToken:
+			token := tokenizer.Token()
+			switch token.DataAtom {
+			case htmlatom.Base:
+				if baseResolved {
+					continue
+				}
+				href := strings.TrimSpace(tokenAttr(token, "href"))
+				if href == "" {
+					continue
+				}
 				resolved := resolveURL(sourceURL, href)
 				if isDiscoverableFeedURL(resolved) {
-					return resolved, true
+					baseURL = resolved
+					baseResolved = true
+				}
+			case htmlatom.Link:
+				rel := strings.ToLower(tokenAttr(token, "rel"))
+				isAlternate := hasRel(rel, "alternate")
+				isFeed := hasRel(rel, "feed")
+				if !isAlternate && !isFeed {
+					continue
+				}
+				href := strings.TrimSpace(tokenAttr(token, "href"))
+				if href == "" {
+					continue
+				}
+				linkType := tokenAttr(token, "type")
+				title := strings.ToLower(tokenAttr(token, "title"))
+				if isFeed || isFeedMediaType(linkType) || looksLikeFeedPath(href) || strings.Contains(title, "rss") || strings.Contains(title, "atom") {
+					resolved := resolveURL(baseURL, href)
+					if isDiscoverableFeedURL(resolved) {
+						return resolved, true
+					}
 				}
 			}
 		}
-		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			if resolved, ok := walk(child); ok {
-				return resolved, true
-			}
-		}
-		return "", false
 	}
-	return walk(root)
+}
+
+func tokenAttr(token html.Token, name string) string {
+	for _, attr := range token.Attr {
+		if attr.Key == name {
+			return attr.Val
+		}
+	}
+	return ""
 }
 
 func looksLikeHTML(body []byte, contentType string) bool {
@@ -230,48 +293,6 @@ func looksLikeHTML(body []byte, contentType string) bool {
 		bytes.HasPrefix(lower, []byte("<html")) ||
 		bytes.HasPrefix(lower, []byte("<head")) ||
 		bytes.HasPrefix(lower, []byte("<?xml-stylesheet"))
-}
-
-func feedLinkHrefs(root *html.Node) []string {
-	links := make([]string, 0, 4)
-	var walk func(*html.Node)
-	walk = func(node *html.Node) {
-		if node == nil {
-			return
-		}
-		if node.Type == html.ElementNode && node.DataAtom == htmlatom.Link {
-			rel := strings.ToLower(attrValue(node, "rel"))
-			isAlternate := hasRel(rel, "alternate")
-			isFeed := hasRel(rel, "feed")
-			if !isAlternate && !isFeed {
-				goto NEXT
-			}
-			href := strings.TrimSpace(attrValue(node, "href"))
-			if href == "" {
-				goto NEXT
-			}
-			linkType := attrValue(node, "type")
-			title := strings.ToLower(attrValue(node, "title"))
-			if isFeed || isFeedMediaType(linkType) || looksLikeFeedPath(href) || strings.Contains(title, "rss") || strings.Contains(title, "atom") {
-				links = append(links, href)
-			}
-		}
-	NEXT:
-		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			walk(child)
-		}
-	}
-	walk(root)
-	return links
-}
-
-func attrValue(node *html.Node, name string) string {
-	for _, attr := range node.Attr {
-		if strings.EqualFold(attr.Key, name) {
-			return attr.Val
-		}
-	}
-	return ""
 }
 
 func hasRel(rel, want string) bool {
@@ -500,6 +521,84 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 		items = append(items, item)
 	}
 	return items, true, nil
+}
+
+func nextPageURL(body []byte, sourceURL string) (string, error) {
+	body = bytes.TrimPrefix(body, []byte{0xef, 0xbb, 0xbf})
+	if looksLikeJSON(body) {
+		var feed struct {
+			NextURL string `json:"next_url"`
+		}
+		if err := json.Unmarshal(body, &feed); err != nil {
+			return "", err
+		}
+		return paginationURL(resolveURL(sourceURL, feed.NextURL)), nil
+	}
+
+	decoder := xml.NewDecoder(bytes.NewReader(body))
+	decoder.CharsetReader = charset.NewReaderLabel
+	var bases []string
+	entryDepth := 0
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return "", nil
+		}
+		if err != nil {
+			return "", err
+		}
+		switch element := token.(type) {
+		case xml.StartElement:
+			base := sourceURL
+			if len(bases) > 0 {
+				base = bases[len(bases)-1]
+			}
+			for _, attribute := range element.Attr {
+				if isXMLBase(attribute) {
+					base = resolveURL(base, attribute.Value)
+				}
+			}
+			bases = append(bases, base)
+			if element.Name.Local == "entry" || element.Name.Local == "item" {
+				entryDepth++
+			}
+			if entryDepth != 0 || element.Name.Space != atomNamespace || element.Name.Local != "link" {
+				continue
+			}
+			var href string
+			isNext := false
+			for _, attribute := range element.Attr {
+				switch strings.ToLower(attribute.Name.Local) {
+				case "href":
+					href = attribute.Value
+				case "rel":
+					for _, value := range strings.Fields(attribute.Value) {
+						if strings.EqualFold(value, "next") {
+							isNext = true
+							break
+						}
+					}
+				}
+			}
+			if isNext && href != "" {
+				return paginationURL(resolveURL(base, href)), nil
+			}
+		case xml.EndElement:
+			if element.Name.Local == "entry" || element.Name.Local == "item" {
+				entryDepth--
+			}
+			bases = bases[:len(bases)-1]
+		}
+	}
+}
+
+func paginationURL(value string) string {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return value
+	}
+	parsed.Fragment, parsed.RawFragment = "", ""
+	return parsed.String()
 }
 
 func normalizeAttachment(attachment Attachment) (Attachment, bool) {

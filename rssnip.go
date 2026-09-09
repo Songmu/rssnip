@@ -49,6 +49,7 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 	jqExpression := fs.String("jq", "", "apply a jq expression to each item")
 	rawOutput := fs.Bool("r", false, "write string jq results without JSON quoting")
 	withFeed := fs.Bool("with-feed", false, "include source feed information in each item")
+	maxPages := fs.Int("max-pages", defaultMaxPages, "maximum pages to fetch from each feed")
 	if err := fs.Parse(argv); err != nil {
 		return err
 	}
@@ -67,6 +68,9 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 	}
 	if *rawOutput && *jqExpression == "" {
 		return fmt.Errorf("-r requires --jq")
+	}
+	if *maxPages < 1 {
+		return fmt.Errorf("--max-pages must be at least 1")
 	}
 
 	since, err := parseTimeBound(*sinceValue, false)
@@ -87,7 +91,7 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	for _, feedURL := range urls {
-		feedItems, err := fetchFeed(ctx, client, feedURL)
+		feedItems, err := fetchFeedPages(ctx, client, feedURL, *maxPages)
 		if err != nil {
 			return err
 		}
