@@ -363,6 +363,7 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 }
 
 func nextPageURL(body []byte, sourceURL string) (string, error) {
+	body = bytes.TrimPrefix(body, []byte{0xef, 0xbb, 0xbf})
 	if looksLikeJSON(body) {
 		var feed struct {
 			NextURL string `json:"next_url"`
@@ -400,7 +401,7 @@ func nextPageURL(body []byte, sourceURL string) (string, error) {
 			if element.Name.Local == "entry" || element.Name.Local == "item" {
 				entryDepth++
 			}
-			if entryDepth != 0 || element.Name.Local != "link" {
+			if entryDepth != 0 || element.Name.Space != atomNamespace || element.Name.Local != "link" {
 				continue
 			}
 			var href string

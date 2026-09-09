@@ -142,26 +142,32 @@ func TestFetchFeedPagesFollowsAtomAndJSONFeedPagination(t *testing.T) {
 
 func TestFetchFeedPagesBoundsAndDeduplicates(t *testing.T) {
 	t.Parallel()
-	var requests int
+	var requests, pageThreeRequests int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
 		switch r.URL.Path {
 		case "/one":
 			w.Write([]byte(`{"version":"https://jsonfeed.org/version/1.1","next_url":"/two","items":[{"id":"one"},{"id":"duplicate"}]}`))
 		case "/two":
-			w.Write([]byte(`{"version":"https://jsonfeed.org/version/1.1","next_url":"/one","items":[{"id":"duplicate"},{"id":"two"}]}`))
+			w.Write([]byte(`{"version":"https://jsonfeed.org/version/1.1","next_url":"/three","items":[{"id":"duplicate"},{"id":"two"}]}`))
+		case "/three":
+			pageThreeRequests++
+			w.Write([]byte(`{"version":"https://jsonfeed.org/version/1.1","items":[{"id":"three"}]}`))
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	t.Cleanup(server.Close)
 
-	items, err := fetchFeedPages(context.Background(), server.Client(), server.URL+"/one", 10)
+	items, err := fetchFeedPages(context.Background(), server.Client(), server.URL+"/one", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if requests != 2 {
 		t.Errorf("requests = %d, want 2", requests)
+	}
+	if pageThreeRequests != 0 {
+		t.Errorf("page three requests = %d, want 0", pageThreeRequests)
 	}
 	if len(items) != 3 || items[0].ID != "one" || items[1].ID != "duplicate" || items[2].ID != "two" {
 		t.Errorf("items = %#v", items)
