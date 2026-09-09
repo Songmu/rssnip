@@ -325,7 +325,7 @@ func TestRunErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"missing URL", nil, "at least one feed URL is required"},
+		{"missing URL", nil, "at least one feed or blog/site URL is required"},
 		{"raw without jq", []string{"-r", "https://example.com/feed"}, "-r requires --jq"},
 		{"removed JSON option", []string{"--json", "https://example.com/feed"}, "flag provided but not defined: -json"},
 		{"invalid since", []string{"--since", "yesterday", "https://example.com/feed"}, "invalid --since"},

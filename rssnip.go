@@ -36,14 +36,15 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 	fs.SetOutput(errStream)
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: %s [options] [--url URL ...] [URL ...]\n\n", cmdName)
-		fmt.Fprintln(fs.Output(), "Feed URLs may also be read one per line from standard input.")
+		fmt.Fprintln(fs.Output(), "Feed or blog/site URLs may be supplied with --url, as positional arguments,")
+		fmt.Fprintln(fs.Output(), "or one per line on standard input. HTML pages are searched for a feed link.")
 		fmt.Fprintln(fs.Output(), "Options:")
 		fs.PrintDefaults()
 	}
 
 	ver := fs.Bool("version", false, "display version")
 	var urls stringList
-	fs.Var(&urls, "url", "feed URL (repeatable)")
+	fs.Var(&urls, "url", "feed or blog/site URL (repeatable)")
 	sinceValue := fs.String("since", "", "include items on or after RFC3339 time or YYYY-MM-DD")
 	untilValue := fs.String("until", "", "include items on or before RFC3339 time or YYYY-MM-DD")
 	jqExpression := fs.String("jq", "", "apply a jq expression to each item")
@@ -58,13 +59,13 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 	}
 	stdinURLs, err := readStdinURLs(inStream)
 	if err != nil {
-		return fmt.Errorf("read feed URLs from standard input: %w", err)
+		return fmt.Errorf("read feed or blog/site URLs from standard input: %w", err)
 	}
 	urls = append(urls, fs.Args()...)
 	urls = append(urls, stdinURLs...)
 	if len(urls) == 0 {
 		fs.Usage()
-		return fmt.Errorf("at least one feed URL is required")
+		return fmt.Errorf("at least one feed or blog/site URL is required")
 	}
 	if *rawOutput && *jqExpression == "" {
 		return fmt.Errorf("-r requires --jq")

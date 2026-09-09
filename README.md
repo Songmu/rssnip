@@ -54,12 +54,17 @@ missing, a deterministic SHA-256 identifier is generated from the supported
 item fields before normalization. Unknown fields (including custom extensions)
 are ignored; changing a supported field changes the generated identifier.
 
-Every item is emitted as one compact JSON object per line. Feed URLs may be
-supplied by repeating `--url`, as positional arguments, one per line on
-standard input, or by combining any of these forms; output preserves feed and
-item order. When a blog or site URL is provided, `rssnip` also tries to
-discover linked feeds from HTML `<link rel="alternate">` entries and then
-fetches those feeds.
+Every item is emitted as one compact JSON object per line. Feed or blog/site
+URLs may be supplied by repeating `--url`, as positional arguments, one per
+line on standard input, or by combining any of these forms; output preserves feed and
+item order. When a URL returns an HTML page instead of a feed, `rssnip` scans
+`<link>` elements with `rel="alternate"` or `rel="feed"`. It selects the first
+eligible feed candidate in document order and fetches that single feed, not
+every linked feed. A `rel="alternate"` link qualifies through its media type,
+a feed-like filename/path token, or a standalone RSS/Atom word in its title.
+If the selected URL fails to fetch or parse as a feed, the error is returned;
+later candidates are not retried. Pagination of the selected feed follows the
+same rules as a direct feed URL.
 
 ### Pagination
 

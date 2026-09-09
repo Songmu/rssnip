@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/mmcdole/gofeed"
 	"github.com/mmcdole/gofeed/atom"
@@ -259,8 +260,8 @@ func discoverFeedURL(body []byte, sourceURL, contentType string) (string, bool) 
 					continue
 				}
 				linkType := tokenAttr(token, "type")
-				title := strings.ToLower(tokenAttr(token, "title"))
-				if isFeed || isFeedMediaType(linkType) || looksLikeFeedPath(href) || strings.Contains(title, "rss") || strings.Contains(title, "atom") {
+				title := tokenAttr(token, "title")
+				if isFeed || isFeedMediaType(linkType) || looksLikeFeedPath(href) || hasFeedHint(title, "rss", "atom") {
 					resolved := resolveURL(baseURL, href)
 					if isDiscoverableFeedURL(resolved) {
 						return resolved, true
@@ -328,17 +329,27 @@ func looksLikeFeedPath(href string) bool {
 	if err != nil {
 		return false
 	}
-	candidate := parsed.Path
-	if candidate == "" {
-		candidate = href
-	}
-	lower := strings.ToLower(candidate)
+	lower := strings.ToLower(parsed.Path)
 	return strings.HasSuffix(lower, ".xml") ||
 		strings.HasSuffix(lower, ".rss") ||
 		strings.HasSuffix(lower, ".rdf") ||
 		strings.HasSuffix(lower, ".atom") ||
 		strings.HasSuffix(lower, ".json") ||
-		strings.Contains(lower, "feed")
+		hasFeedHint(lower, "feed")
+}
+
+func hasFeedHint(value string, hints ...string) bool {
+	words := strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsNumber(r)
+	})
+	for _, word := range words {
+		for _, hint := range hints {
+			if word == hint {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isDiscoverableFeedURL(value string) bool {
