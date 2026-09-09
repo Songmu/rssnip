@@ -73,7 +73,7 @@ func TestRunDiscoversFeedFromBlogURLWithBaseHref(t *testing.T) {
 		switch r.URL.Path {
 		case "/blog/":
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			fmt.Fprint(w, `<html><head><base href="/assets/"><link rel="alternate" type="application/rss+xml" href="feed.xml"></head></html>`)
+			fmt.Fprint(w, `<html><head><link rel="alternate" type="application/rss+xml" href="feed.xml"><base href="/assets/"></head></html>`)
 		case "/assets/feed.xml":
 			w.Header().Set("Content-Type", "application/rss+xml")
 			fmt.Fprint(w, testRSS)

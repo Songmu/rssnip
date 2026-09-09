@@ -229,9 +229,13 @@ func discoverFeedURL(body []byte, sourceURL, contentType string) (string, bool) 
 		return "", false
 	}
 	tokenizer := html.NewTokenizer(reader)
-	baseURL := sourceURL
+	baseURL := discoveryBaseURL(tokenizer, sourceURL)
+	reader, err = charset.NewReader(bytes.NewReader(body), contentType)
+	if err != nil {
+		return "", false
+	}
+	tokenizer = html.NewTokenizer(reader)
 	sourceFetchURL := discoveryFetchURL(sourceURL)
-	baseResolved := false
 	for {
 		switch tokenizer.Next() {
 		case html.ErrorToken:
@@ -239,24 +243,6 @@ func discoverFeedURL(body []byte, sourceURL, contentType string) (string, bool) 
 		case html.StartTagToken, html.SelfClosingTagToken:
 			token := tokenizer.Token()
 			switch token.DataAtom {
-			case htmlatom.Base:
-				if baseResolved {
-					continue
-				}
-				href := strings.TrimSpace(tokenAttr(token, "href"))
-				if href == "" {
-					continue
-				}
-				pageURL, pageErr := url.Parse(sourceURL)
-				reference, referenceErr := url.Parse(href)
-				if pageErr != nil || referenceErr != nil {
-					continue
-				}
-				resolved := pageURL.ResolveReference(reference)
-				if resolved.IsAbs() {
-					baseURL = resolved.String()
-					baseResolved = true
-				}
 			case htmlatom.Link:
 				rel := strings.ToLower(tokenAttr(token, "rel"))
 				isAlternate := hasRel(rel, "alternate")
@@ -276,6 +262,37 @@ func discoverFeedURL(body []byte, sourceURL, contentType string) (string, bool) 
 						return resolved, true
 					}
 				}
+			}
+		}
+	}
+}
+
+// A document's base applies even to links that precede the base element.
+func discoveryBaseURL(tokenizer *html.Tokenizer, sourceURL string) string {
+	pageURL, err := url.Parse(sourceURL)
+	if err != nil {
+		return sourceURL
+	}
+	for {
+		switch tokenizer.Next() {
+		case html.ErrorToken:
+			return sourceURL
+		case html.StartTagToken, html.SelfClosingTagToken:
+			token := tokenizer.Token()
+			if token.DataAtom != htmlatom.Base {
+				continue
+			}
+			href := strings.TrimSpace(tokenAttr(token, "href"))
+			if href == "" {
+				continue
+			}
+			reference, err := url.Parse(href)
+			if err != nil {
+				continue
+			}
+			resolved := pageURL.ResolveReference(reference)
+			if resolved.IsAbs() {
+				return resolved.String()
 			}
 		}
 	}

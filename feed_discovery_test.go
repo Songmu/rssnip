@@ -104,6 +104,21 @@ func TestDiscoveryCandidateFragmentUsesHTMLBase(t *testing.T) {
 	}
 }
 
+func TestDiscoveryUsesBaseAfterLink(t *testing.T) {
+	t.Parallel()
+	for _, contentType := range []string{"text/html", "text/html; charset=iso-8859-1"} {
+		body := []byte(`<html><head>
+		  <link rel="feed" href="feed.xml">
+		  <base href="/assets/">
+		  <base href="/ignored/">
+		</head></html>`)
+		got, ok := discoverFeedURL(body, "https://example.com/blog/", contentType)
+		if !ok || got != "https://example.com/assets/feed.xml" {
+			t.Errorf("discovery = %q, %v", got, ok)
+		}
+	}
+}
+
 func TestDiscoveryUsesFirstBaseRegardlessOfFetchability(t *testing.T) {
 	t.Parallel()
 	for _, base := range []string{
