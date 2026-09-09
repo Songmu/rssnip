@@ -179,13 +179,42 @@ func discoverFeedURL(body []byte, sourceURL, contentType string) (string, bool) 
 	if err != nil {
 		return "", false
 	}
+	baseURL := sourceURL
+	if resolved, ok := htmlBaseURL(root, sourceURL); ok {
+		baseURL = resolved
+	}
 	for _, href := range feedLinkHrefs(root) {
-		resolved := resolveURL(sourceURL, href)
+		resolved := resolveURL(baseURL, href)
 		if isDiscoverableFeedURL(resolved) {
 			return resolved, true
 		}
 	}
 	return "", false
+}
+
+func htmlBaseURL(root *html.Node, sourceURL string) (string, bool) {
+	var walk func(*html.Node) (string, bool)
+	walk = func(node *html.Node) (string, bool) {
+		if node == nil {
+			return "", false
+		}
+		if node.Type == html.ElementNode && node.DataAtom == htmlatom.Base {
+			href := strings.TrimSpace(attrValue(node, "href"))
+			if href != "" {
+				resolved := resolveURL(sourceURL, href)
+				if isDiscoverableFeedURL(resolved) {
+					return resolved, true
+				}
+			}
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			if resolved, ok := walk(child); ok {
+				return resolved, true
+			}
+		}
+		return "", false
+	}
+	return walk(root)
 }
 
 func looksLikeHTML(body []byte, contentType string) bool {
@@ -212,7 +241,9 @@ func feedLinkHrefs(root *html.Node) []string {
 		}
 		if node.Type == html.ElementNode && node.DataAtom == htmlatom.Link {
 			rel := strings.ToLower(attrValue(node, "rel"))
-			if !hasRel(rel, "alternate") && !hasRel(rel, "feed") {
+			isAlternate := hasRel(rel, "alternate")
+			isFeed := hasRel(rel, "feed")
+			if !isAlternate && !isFeed {
 				goto NEXT
 			}
 			href := strings.TrimSpace(attrValue(node, "href"))
@@ -221,7 +252,7 @@ func feedLinkHrefs(root *html.Node) []string {
 			}
 			linkType := attrValue(node, "type")
 			title := strings.ToLower(attrValue(node, "title"))
-			if isFeedMediaType(linkType) || looksLikeFeedPath(href) || strings.Contains(title, "rss") || strings.Contains(title, "atom") {
+			if isFeed || isFeedMediaType(linkType) || looksLikeFeedPath(href) || strings.Contains(title, "rss") || strings.Contains(title, "atom") {
 				links = append(links, href)
 			}
 		}

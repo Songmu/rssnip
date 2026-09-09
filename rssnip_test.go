@@ -66,6 +66,62 @@ func TestRunDiscoversFeedFromBlogURL(t *testing.T) {
 	}
 }
 
+func TestRunDiscoversFeedFromBlogURLWithBaseHref(t *testing.T) {
+	t.Parallel()
+	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/blog/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, `<html><head><base href="/assets/"><link rel="alternate" type="application/rss+xml" href="feed.xml"></head></html>`)
+		case "/assets/feed.xml":
+			w.Header().Set("Content-Type", "application/rss+xml")
+			fmt.Fprint(w, testRSS)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{"--url", server.URL + "/blog/", "--with-feed", "--jq", "._feed.feed_url", "-r"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Repeat(server.URL+"/assets/feed.xml\n", 4)
+	if got := stdout.String(); got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestRunDiscoversFeedFromRelFeedLink(t *testing.T) {
+	t.Parallel()
+	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(w, `<html><head><link rel="feed" href="/rss"></head></html>`)
+		case "/rss":
+			w.Header().Set("Content-Type", "application/rss+xml")
+			fmt.Fprint(w, testRSS)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{"--url", server.URL, "--with-feed", "--jq", "._feed.feed_url", "-r"}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Repeat(server.URL+"/rss\n", 4)
+	if got := stdout.String(); got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+}
+
 func TestRunAcceptsURLsFromStdinAndMergesSources(t *testing.T) {
 	t.Parallel()
 	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
