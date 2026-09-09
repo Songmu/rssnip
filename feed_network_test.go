@@ -173,3 +173,32 @@ func TestFetchFeedPagesBoundsAndDeduplicates(t *testing.T) {
 		t.Errorf("items = %#v", items)
 	}
 }
+
+func TestFetchFeedPagesStopsCycles(t *testing.T) {
+	t.Parallel()
+	var oneRequests, twoRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/one":
+			oneRequests++
+			w.Write([]byte(`{"version":"https://jsonfeed.org/version/1.1","next_url":"/two","items":[{"id":"one"}]}`))
+		case "/two":
+			twoRequests++
+			w.Write([]byte(`{"version":"https://jsonfeed.org/version/1.1","next_url":"/one","items":[{"id":"two"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	items, err := fetchFeedPages(context.Background(), server.Client(), server.URL+"/one", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if oneRequests != 1 || twoRequests != 1 {
+		t.Errorf("requests = /one: %d, /two: %d, want 1 each", oneRequests, twoRequests)
+	}
+	if len(items) != 2 || items[0].ID != "one" || items[1].ID != "two" {
+		t.Errorf("items = %#v", items)
+	}
+}
