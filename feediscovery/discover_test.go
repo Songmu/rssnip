@@ -4,9 +4,6 @@ import (
 	"bytes"
 	"strings"
 	"testing"
-	"unicode/utf16"
-
-	"github.com/Songmu/rssnip/feediscovery"
 )
 
 func TestDiscoverFeedURLHints(t *testing.T) {
@@ -51,7 +48,7 @@ func TestDiscoverFeedURLHints(t *testing.T) {
 
 func TestDiscoveryCandidateFragmentUsesHTMLBase(t *testing.T) {
 	t.Parallel()
-	body := []byte(`<html><head><base href="/feed.xml"><link rel="feed" href="#rss"></head></html>`)
+	body := mustReadTestdata(t, "fragment-base.html")
 	got, ok := firstURL(t, body, "https://example.com/blog/", "text/html")
 	if !ok || got != "https://example.com/feed.xml" {
 		t.Errorf("discovery = %q, %v", got, ok)
@@ -60,28 +57,22 @@ func TestDiscoveryCandidateFragmentUsesHTMLBase(t *testing.T) {
 
 func TestDiscoveryUsesBaseAfterLink(t *testing.T) {
 	t.Parallel()
+	body := mustReadTestdata(t, "late-base.html")
 	for _, contentType := range []string{"text/html", "text/html; charset=iso-8859-1"} {
-		body := []byte(`<html><head>
-		  <link rel="feed" href="feed.xml">
-		  <base href="/assets/">
-		  <base href="/ignored/">
-		</head></html>`)
 		got, ok := firstURL(t, body, "https://example.com/blog/", contentType)
 		if !ok || got != "https://example.com/assets/feed.xml" {
 			t.Errorf("discovery = %q, %v", got, ok)
 		}
 	}
-
 }
 
 func TestDiscoveryEmptyBaseTakesPrecedence(t *testing.T) {
 	t.Parallel()
-	for _, first := range []string{`href=""`, `href="   "`, `href`} {
-		body := []byte(`<html><base target="_blank"><base ` + first + `>
-		  <base href="/assets/"><link rel="feed" href="feed.xml"></html>`)
+	for _, fixture := range []string{"empty-base.html", "whitespace-base.html", "bare-base.html"} {
+		body := mustReadTestdata(t, fixture)
 		got, ok := firstURL(t, body, "https://example.com/blog/index.html", "text/html")
 		if !ok || got != "https://example.com/blog/feed.xml" {
-			t.Errorf("base %s: discovery = %q, %v", first, got, ok)
+			t.Errorf("%s: discovery = %q, %v", fixture, got, ok)
 		}
 	}
 }
@@ -89,49 +80,34 @@ func TestDiscoveryEmptyBaseTakesPrecedence(t *testing.T) {
 func TestDiscoveryXHTMLEncoding(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {
-		name, prefix, meta, path, contentType string
+		name, fixture, contentType string
 	}{
-		{"default UTF-8", "", "", "/caf\xc3\xa9.xml", "application/xhtml+xml"},
-		{"ignore HTML meta", "", `<meta charset="windows-1252" />`, "/caf\xc3\xa9.xml", "application/xhtml+xml"},
-		{"XML declaration", `<?xml version="1.0" encoding="iso-8859-1"?>`, `<meta charset="utf-8" />`, "/caf\xe9.xml", "application/xhtml+xml"},
-		{"XML declaration whitespace", "<?xml\tversion=\"1.0\" encoding=\"iso-8859-1\"?>", `<meta charset="utf-8" />`, "/caf\xe9.xml", "application/xhtml+xml"},
-		{"HTTP charset", "", "", "/caf\xe9.xml", "application/xhtml+xml; charset=iso-8859-1"},
-		{"HTTP overrides declaration", `<?xml version="1.0" encoding="iso-8859-1"?>`, "", "/caf\xc3\xa9.xml", "application/xhtml+xml; charset=utf-8"},
-		{"BOM overrides HTTP", "\xef\xbb\xbf", "", "/caf\xc3\xa9.xml", "application/xhtml+xml; charset=iso-8859-1"},
+		{"default UTF-8", "utf8.xhtml", "application/xhtml+xml"},
+		{"ignore HTML meta", "utf8-misleading-meta.xhtml", "application/xhtml+xml"},
+		{"XML declaration", "latin1-declaration.xhtml", "application/xhtml+xml"},
+		{"XML declaration whitespace", "latin1-declaration-tab.xhtml", "application/xhtml+xml"},
+		{"HTTP charset", "latin1-http.xhtml", "application/xhtml+xml; charset=iso-8859-1"},
+		{"HTTP overrides declaration", "utf8-http-override.xhtml", "application/xhtml+xml; charset=utf-8"},
+		{"BOM overrides HTTP", "utf8-bom.xhtml", "application/xhtml+xml; charset=iso-8859-1"},
+		{"UTF-16 big endian BOM", "utf16be-bom.xhtml", "application/xhtml+xml; charset=iso-8859-1"},
+		{"UTF-16 little endian BOM", "utf16le-bom.xhtml", "application/xhtml+xml; charset=iso-8859-1"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			body := []byte(tt.prefix + `<html xmlns="http://www.w3.org/1999/xhtml"><head>` + tt.meta +
-				"<!--" + strings.Repeat(" ", 2048) + "-->" +
-				`<link rel="feed" href="` + tt.path + `" /></head></html>`)
+			body := mustReadTestdata(t, tt.fixture)
+			if !strings.HasPrefix(tt.fixture, "utf16") && bytes.Index(body, []byte("href=")) <= 1024 {
+				t.Fatal("fixture must place its non-ASCII URL beyond the charset sniff window")
+			}
 			got, ok := firstURL(t, body, "https://example.com/blog/", tt.contentType)
 			if !ok || got != "https://example.com/caf%C3%A9.xml" {
 				t.Errorf("discovery = %q, %v", got, ok)
 			}
 		})
 	}
-	for _, littleEndian := range []bool{false, true} {
-		body := []byte{0xfe, 0xff}
-		if littleEndian {
-			body = []byte{0xff, 0xfe}
-		}
-		for _, value := range utf16.Encode([]rune(`<html xmlns="http://www.w3.org/1999/xhtml"><head><link rel="feed" href="/caf` + "\u00e9" + `.xml" /></head></html>`)) {
-			pair := []byte{byte(value >> 8), byte(value)}
-			if littleEndian {
-				pair[0], pair[1] = pair[1], pair[0]
-			}
-			body = append(body, pair...)
-		}
-		got, ok := firstURL(t, body, "https://example.com/blog/", "application/xhtml+xml; charset=iso-8859-1")
-		if !ok || got != "https://example.com/caf%C3%A9.xml" {
-			t.Errorf("UTF-16 little-endian=%v: discovery = %q, %v", littleEndian, got, ok)
-		}
-	}
 }
 
 func TestDiscoveryMalformedFirstBase(t *testing.T) {
 	t.Parallel()
-	body := []byte(`<html><base href="%zz"><base href="https://other.example/">
-	  <link rel="feed" href="feed.xml"></html>`)
+	body := mustReadTestdata(t, "malformed-base.html")
 	got, ok := firstURL(t, body, "https://example.com/blog/index.html", "text/html")
 	if !ok || got != "https://example.com/blog/feed.xml" {
 		t.Errorf("discovery = %q, %v", got, ok)
@@ -140,27 +116,21 @@ func TestDiscoveryMalformedFirstBase(t *testing.T) {
 
 func TestDiscoveryXHTMLUsesXMLTokens(t *testing.T) {
 	t.Parallel()
-	for _, prefix := range []string{
-		`<template/>`,
-		`<template><template/></template>`,
-		`<script/>`,
-		`<template><base href="/wrong/"/><link rel="feed" href="/wrong"/></template>`,
-		`<svg xmlns="http://www.w3.org/2000/svg"><link rel="feed" href="/wrong"/></svg>`,
+	for _, fixture := range []string{
+		"empty-template.xhtml", "nested-template.xhtml", "empty-script.xhtml",
+		"template-links.xhtml", "foreign-namespace.xhtml",
 	} {
-		body := []byte(`<html xmlns="http://www.w3.org/1999/xhtml"><head>` + prefix +
-			`<link rel="feed" href="rss"/><base href="/correct/"/></head></html>`)
+		body := mustReadTestdata(t, fixture)
 		got, ok := firstURL(t, body, "https://example.com/blog/", "application/xhtml+xml")
 		if !ok || got != "https://example.com/correct/rss" {
-			t.Errorf("prefix %q: discovery = %q, %v", prefix, got, ok)
+			t.Errorf("%s: discovery = %q, %v", fixture, got, ok)
 		}
 	}
-	body := []byte(`<h:html xmlns:h="http://www.w3.org/1999/xhtml"><h:head>
-	  <h:template/><h:link rel="feed" href="/rss"/></h:head></h:html>`)
+	body := mustReadTestdata(t, "prefixed-namespace.xhtml")
 	if got, ok := firstURL(t, body, "https://example.com/", "application/xhtml+xml"); !ok || got != "https://example.com/rss" {
 		t.Errorf("namespaced discovery = %q, %v", got, ok)
 	}
-	body = []byte(`<html><head><template/><link rel="feed" href="/hidden"></template>
-	  <link rel="feed" href="/rss"></head></html>`)
+	body = mustReadTestdata(t, "self-closing-template.html")
 	if got, ok := firstURL(t, body, "https://example.com/", "text/html"); !ok || got != "https://example.com/rss" {
 		t.Errorf("HTML template recovery = %q, %v", got, ok)
 	}
@@ -168,9 +138,10 @@ func TestDiscoveryXHTMLUsesXMLTokens(t *testing.T) {
 
 func TestDiscoveryRecognizesLeadingHTMLComments(t *testing.T) {
 	t.Parallel()
+	document := mustReadTestdata(t, "feed-link.html")
 	for _, prefix := range []string{"<!-- generated -->", "\xef\xbb\xbf\n<!-- generated -->\n"} {
 		for _, contentType := range []string{"", "text/plain", "application/octet-stream"} {
-			body := []byte(prefix + `<html><link rel="feed" href="/rss"></html>`)
+			body := append([]byte(prefix), document...)
 			got, ok := firstURL(t, body, "https://example.com/blog/", contentType)
 			if !ok || got != "https://example.com/rss" {
 				t.Errorf("discovery with %q prefix and %q content type = %q, %v", prefix, contentType, got, ok)
@@ -181,20 +152,14 @@ func TestDiscoveryRecognizesLeadingHTMLComments(t *testing.T) {
 
 func TestDiscoveryUsesFirstBaseRegardlessOfFetchability(t *testing.T) {
 	t.Parallel()
-	for _, base := range []string{
-		"ftp://example.com/assets/",
-		"https://user:password@example.com/assets/",
-	} {
-		t.Run(base, func(t *testing.T) {
-			body := `<html><head><base href="` + base + `">
-			  <base href="https://example.com/incorrect/">
-			  <link rel="feed" href="relative.xml">
-			</head></html>`
-			if got, ok := firstURL(t, []byte(body), "https://example.com/blog/", "text/html"); ok {
+	for _, fixture := range []string{"ftp-base", "userinfo-base"} {
+		t.Run(fixture, func(t *testing.T) {
+			body := mustReadTestdata(t, fixture+".html")
+			if got, ok := firstURL(t, body, "https://example.com/blog/", "text/html"); ok {
 				t.Errorf("non-fetchable base should not fall back to page/later base: %q", got)
 			}
-			body = strings.Replace(body, "</head>", `<link rel="feed" href="https://example.com/correct.xml"></head>`, 1)
-			got, ok := firstURL(t, []byte(body), "https://example.com/blog/", "text/html")
+			body = mustReadTestdata(t, fixture+"-absolute-link.html")
+			got, ok := firstURL(t, body, "https://example.com/blog/", "text/html")
 			if !ok || got != "https://example.com/correct.xml" {
 				t.Errorf("absolute fetchable candidate = %q, %v", got, ok)
 			}
@@ -204,12 +169,7 @@ func TestDiscoveryUsesFirstBaseRegardlessOfFetchability(t *testing.T) {
 
 func TestDiscoveryIgnoresTemplateContents(t *testing.T) {
 	t.Parallel()
-	body := []byte(`<html><head>
-	  <template><base href="/wrong/"><link rel="feed" href="/placeholder">
-	    <template><base href="/also-wrong/"><link rel="feed" href="/nested"></template>
-	  </template>
-	  <link rel="feed" href="feed.xml"><base href="/correct/">
-	</head></html>`)
+	body := mustReadTestdata(t, "templates.html")
 	got, ok := firstURL(t, body, "https://example.com/blog/", "text/html")
 	if !ok || got != "https://example.com/correct/feed.xml" {
 		t.Errorf("discovery = %q, %v", got, ok)
@@ -258,16 +218,4 @@ func TestDiscoveryAcceptsUppercaseSchemes(t *testing.T) {
 		}
 
 	}
-}
-
-func firstURL(t *testing.T, body []byte, pageURL, contentType string) (string, bool) {
-	t.Helper()
-	links, err := feediscovery.FindAll(bytes.NewReader(body), pageURL, contentType)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(links) == 0 {
-		return "", false
-	}
-	return links[0].URL, true
 }

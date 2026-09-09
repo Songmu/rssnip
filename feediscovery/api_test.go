@@ -14,22 +14,7 @@ import (
 
 func TestFindAllMetadataAndOrder(t *testing.T) {
 	t.Parallel()
-	body := `<html><head>
-	  <link rel="alternate feed" href="one.xml#rss" title="  Caf&#233; &amp; news  " type="APPLICATION/RSS+XML; charset=UTF-8">
-	  <link rel="alternate" href="one.xml#atom" title="Other" type="application/atom+xml">
-	  <link rel="feed" href="https://EXAMPLE.com:443/feeds/one.xml">
-	  <link rel="feed" href="../updates?x=1&amp;y=2" title="">
-	  <link rel="alternate" href="two.json">
-	  <link rel="alternate" href="/feedback" title="Anatomy">
-	  <link rel="feed" href="https://example.com/blog/index.html#feed">
-	  <link rel="feed" href="ftp://example.com/rss">
-	  <link rel="feed" href="https://:443/rss">
-	  <link rel="feed" href="https://user:secret@example.com/rss">
-	  <link rel="feed" href="%zz">
-	  <link rel="feed" href="//[invalid">
-	  <link rel="feed" href="">
-	  <base href="/feeds/">
-	</head></html>`
+	body := string(mustReadTestdata(t, "metadata-order.html"))
 	want := []feediscovery.Link{
 		{URL: "https://example.com/feeds/one.xml", Title: "  Caf\u00e9 & news  ", Type: "APPLICATION/RSS+XML; charset=UTF-8"},
 		{URL: "https://example.com/feeds/one.xml", Title: "Other", Type: "application/atom+xml"},
@@ -54,14 +39,13 @@ func TestFindAllMetadataAndOrder(t *testing.T) {
 
 func TestFindAllDecodedMetadata(t *testing.T) {
 	t.Parallel()
-	for _, tt := range []struct{ prefix, contentType string }{
-		{"", "text/html; charset=iso-8859-1"},
-		{`<meta charset="iso-8859-1">`, ""},
-		{`<?xml version="1.0" encoding="iso-8859-1"?>`, "application/xhtml+xml"},
+	for _, tt := range []struct{ fixture, contentType string }{
+		{"metadata-latin1-http.html", "text/html; charset=iso-8859-1"},
+		{"metadata-latin1-meta.html", ""},
+		{"metadata-latin1.xhtml", "application/xhtml+xml"},
 	} {
-		body := tt.prefix + `<html xmlns="http://www.w3.org/1999/xhtml"><head>` +
-			`<link rel="feed" href="/rss" title="Caf` + "\xe9" + ` &amp; news" type=" application/rss+xml "/></head></html>`
-		got, err := feediscovery.FindAll(strings.NewReader(body), "https://example.com/", tt.contentType)
+		body := mustReadTestdata(t, tt.fixture)
+		got, err := feediscovery.FindAll(bytes.NewReader(body), "https://example.com/", tt.contentType)
 		want := []feediscovery.Link{{
 			URL: "https://example.com/rss", Title: "Caf\u00e9 & news", Type: " application/rss+xml ",
 		}}
@@ -134,7 +118,7 @@ func TestFindAllInvalidArguments(t *testing.T) {
 
 func TestFindAllReadFailuresAndOwnership(t *testing.T) {
 	t.Parallel()
-	body := []byte(`<html><link rel="feed" href="/rss"></html>`)
+	body := mustReadTestdata(t, "feed-link.html")
 	original := bytes.Clone(body)
 	readErr := errors.New("broken input")
 	for _, terminalErr := range []error{readErr, io.EOF} {
@@ -190,27 +174,26 @@ func TestFindAllSizeLimit(t *testing.T) {
 
 func TestFindAllRejectsPartialXHTMLResults(t *testing.T) {
 	t.Parallel()
-	root := `<html xmlns="http://www.w3.org/1999/xhtml">`
-	link := `<link rel="feed" href="/rss"/>`
-	base := `<base href="/feeds/"/>`
-	for _, tt := range []struct{ name, body, stage string }{
-		{"before base", root + `<bad></wrong>` + base + link + `</html>`, "scan document base"},
-		{"without base", root + link + `<bad></wrong></html>`, "scan document base"},
-		{"after base and link", root + base + link + `<bad></wrong></html>`, "scan feed links"},
-		{"truncated", root + base + link + `<bad>`, "scan feed links"},
+	for _, tt := range []struct{ name, fixture, stage string }{
+		{"before base", "malformed-before-base.xhtml", "scan document base"},
+		{"without base", "malformed-no-base.xhtml", "scan document base"},
+		{"after base and link", "malformed-after-link.xhtml", "scan feed links"},
+		{"truncated", "truncated.xhtml", "scan feed links"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			links, err := feediscovery.FindAll(strings.NewReader(tt.body), "https://example.com/", "application/xhtml+xml")
+			body := mustReadTestdata(t, tt.fixture)
+			links, err := feediscovery.FindAll(bytes.NewReader(body), "https://example.com/", "application/xhtml+xml")
 			if err == nil || !strings.Contains(err.Error(), tt.stage) || links != nil {
 				t.Errorf("links = %#v, error = %v, want nil and %q error", links, err, tt.stage)
 			}
 		})
 	}
-	for _, tt := range []struct{ body, contentType string }{
-		{root + link + "</html>", "application/xhtml+xml; charset=unknown-charset"},
-		{`<?xml version="1.0" encoding="unknown-charset"?>` + root + link + "</html>", "application/xhtml+xml"},
+	for _, tt := range []struct{ fixture, contentType string }{
+		{"feed-link.xhtml", "application/xhtml+xml; charset=unknown-charset"},
+		{"unknown-encoding.xhtml", "application/xhtml+xml"},
 	} {
-		links, err := feediscovery.FindAll(strings.NewReader(tt.body), "https://example.com/", tt.contentType)
+		body := mustReadTestdata(t, tt.fixture)
+		links, err := feediscovery.FindAll(bytes.NewReader(body), "https://example.com/", tt.contentType)
 		if err == nil || !strings.Contains(err.Error(), "decode document") || links != nil {
 			t.Errorf("links = %#v, error = %v, want nil and decode error", links, err)
 		}
