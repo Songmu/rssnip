@@ -12,7 +12,6 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -178,9 +177,6 @@ func fetchLocalFeed(ctx context.Context, feedName string, parsedURL *url.URL) ([
 	}
 	file, err := openLocalFeed(path)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("stat feed %q: %w", feedName, err)
-		}
 		return nil, fmt.Errorf("open feed %q: %w", feedName, err)
 	}
 	defer file.Close()

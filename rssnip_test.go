@@ -277,7 +277,7 @@ func TestRunErrors(t *testing.T) {
 		{"invalid since", []string{"--since", "yesterday", "https://example.com/feed"}, "invalid --since"},
 		{"reversed period", []string{"--since", "2024-02-01", "--until", "2024-01-01", "https://example.com/feed"}, "--since must not be after --until"},
 		{"invalid URL", []string{"--jq", ".", "://bad"}, "invalid feed URL"},
-		{"missing local file", []string{"feed.xml"}, "stat feed"},
+		{"missing local file", []string{"feed.xml"}, "open feed"},
 		{"non-HTTP URL", []string{"ftp://example.com/feed"}, "invalid feed URL"},
 		{"credential URL", []string{"http://user:" + "password@example.com/feed"}, "userinfo is not allowed"},
 		{"credential file URL", []string{"file://user:" + "password@localhost/feed.xml"}, "userinfo is not allowed"},
