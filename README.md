@@ -30,6 +30,9 @@ https://example.com/article
 
 % rssnip --with-feed --url https://example.com/feed.xml
 {"id":"...","url":"https://example.com/article","title":"Example","_feed":{"title":"Example Feed","feed_url":"https://example.com/feed.xml"}}
+
+% rssnip --since 2024-01-01 --updated --url https://example.com/feed.xml
+{"id":"...","url":"https://example.com/revised","title":"Revised","date_published":"2023-12-20T00:00:00Z","date_modified":"2024-01-10T00:00:00Z"}
 ```
 
 ## Description
@@ -133,11 +136,26 @@ Without `--jq`, each JSON Lines record conforms to this JSON Schema:
 
 `--since` and `--until` accept RFC 3339 timestamps or `YYYY-MM-DD` dates. Both
 boundaries are inclusive. Date-only values are interpreted in UTC, and a
-date-only `--until` includes the entire day. Items without a parseable
-publication or modification date are omitted when a date filter is active. No
-date filter is applied by default.
-Unparseable JSON Feed timestamps are omitted from normalized output even when
-no date filter is active.
+date-only `--until` includes the entire day. No date filter is applied by
+default.
+
+Each item is filtered by a single date. The publication date is preferred, and
+the update date is used only when the publication date is missing or
+unparseable. Passing `--updated` reverses that priority, so the update date is
+preferred and the publication date becomes the fallback. This is useful for
+picking up entries that were revised during the period even though they were
+published earlier.
+
+```console
+% rssnip --since 2024-01-01 --updated --url https://example.com/feed.xml
+```
+
+The update date is `updated` in Atom and `date_modified` in JSON Feed. RSS 2.0
+has no update date of its own, but a `dc:date` or an embedded `atom:updated`
+element is recognized; an item carrying neither falls back to its publication
+date. Items with no parseable date at all are omitted when a date filter is
+active. Unparseable JSON Feed timestamps are omitted from normalized output
+even when no date filter is active.
 
 ### jq filtering
 

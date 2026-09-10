@@ -454,25 +454,38 @@ func parseTimeBound(value string, endOfDay bool) (*time.Time, error) {
 	return &parsed, nil
 }
 
-func withinPeriod(item Item, since, until *time.Time) bool {
-	if since == nil && until == nil {
-		return true
+// filterDate reports the single date used to filter an item by period. The
+// publication date takes precedence unless preferUpdated is set, and the other
+// date is used when the preferred one is absent or unparseable.
+func filterDate(item Item, preferUpdated bool) (time.Time, bool) {
+	candidates := [2]string{item.DatePublished, item.DateModified}
+	if preferUpdated {
+		candidates = [2]string{item.DateModified, item.DatePublished}
 	}
-	for _, dateValue := range []string{item.DatePublished, item.DateModified} {
+	for _, dateValue := range candidates {
 		if dateValue == "" {
 			continue
 		}
-		itemTime, err := time.Parse(time.RFC3339Nano, dateValue)
-		if err != nil {
-			continue
+		if itemTime, err := time.Parse(time.RFC3339Nano, dateValue); err == nil {
+			return itemTime, true
 		}
-		if since != nil && itemTime.Before(*since) {
-			continue
-		}
-		if until != nil && itemTime.After(*until) {
-			continue
-		}
+	}
+	return time.Time{}, false
+}
+
+func withinPeriod(item Item, since, until *time.Time, preferUpdated bool) bool {
+	if since == nil && until == nil {
 		return true
 	}
-	return false
+	itemTime, ok := filterDate(item, preferUpdated)
+	if !ok {
+		return false
+	}
+	if since != nil && itemTime.Before(*since) {
+		return false
+	}
+	if until != nil && itemTime.After(*until) {
+		return false
+	}
+	return true
 }

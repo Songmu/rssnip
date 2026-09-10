@@ -46,6 +46,7 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 	fs.Var(&urls, "url", "feed URL (repeatable)")
 	sinceValue := fs.String("since", "", "include items on or after RFC3339 time or YYYY-MM-DD")
 	untilValue := fs.String("until", "", "include items on or before RFC3339 time or YYYY-MM-DD")
+	preferUpdated := fs.Bool("updated", false, "prefer the updated date over the published date when filtering by date")
 	jqExpression := fs.String("jq", "", "apply a jq expression to each item")
 	rawOutput := fs.Bool("r", false, "write string jq results without JSON quoting")
 	withFeed := fs.Bool("with-feed", false, "include source feed information in each item")
@@ -80,6 +81,9 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 	if since != nil && until != nil && since.After(*until) {
 		return fmt.Errorf("--since must not be after --until")
 	}
+	if *preferUpdated && since == nil && until == nil {
+		return fmt.Errorf("--updated requires --since or --until")
+	}
 	code, err := compileQuery(*jqExpression)
 	if err != nil {
 		return err
@@ -95,7 +99,7 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 		if since != nil || until != nil {
 			filtered = feedItems[:0]
 			for _, item := range feedItems {
-				if withinPeriod(item, since, until) {
+				if withinPeriod(item, since, until, *preferUpdated) {
 					filtered = append(filtered, item)
 				}
 			}
