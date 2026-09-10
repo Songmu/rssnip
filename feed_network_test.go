@@ -456,3 +456,36 @@ func TestFetchFeedPagesWordPressFallbackUsesDiscoveredRedirectURL(t *testing.T) 
 		t.Errorf("items = %#v", items)
 	}
 }
+
+func TestFetchFeedPagesWordPressRedirectKeepsGuessedPageNumber(t *testing.T) {
+	t.Parallel()
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.RequestURI())
+		switch {
+		case r.URL.Path == "/feed" && r.URL.Query().Get("paged") == "":
+			w.Write([]byte(`<rss><channel><generator>https://wordpress.org/?v=7.1</generator><item><guid>one</guid></item></channel></rss>`))
+		case r.URL.Path == "/feed" && r.URL.Query().Get("paged") == "2":
+			http.Redirect(w, r, "/canonical", http.StatusFound)
+		case r.URL.Path == "/canonical" && r.URL.Query().Get("paged") == "":
+			w.Write([]byte(`<rss><channel><generator>https://wordpress.org/?v=7.1</generator><item><guid>two</guid></item></channel></rss>`))
+		case r.URL.Path == "/canonical" && r.URL.Query().Get("paged") == "3":
+			w.Write([]byte(`<rss><channel><generator>https://wordpress.org/?v=7.1</generator><item><guid>three</guid></item></channel></rss>`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	items, err := fetchFeedPages(context.Background(), server.Client(), server.URL+"/feed", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 3 || items[0].ID != "one" || items[1].ID != "two" || items[2].ID != "three" {
+		t.Fatalf("items = %#v", items)
+	}
+	wantRequests := []string{"/feed", "/feed?paged=2", "/canonical", "/canonical?paged=3", "/canonical?paged=4"}
+	if strings.Join(requests, "\n") != strings.Join(wantRequests, "\n") {
+		t.Errorf("requests = %v, want %v", requests, wantRequests)
+	}
+}

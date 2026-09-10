@@ -131,28 +131,57 @@ func TestNextWordPressPageURL(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		value string
+		page  int
 		want  string
 	}{
 		{
 			"https://example.com/feed/#part",
+			1,
 			"https://example.com/feed/?paged=2",
 		},
 		{
 			"https://example.com/feed/?category=go",
+			1,
 			"https://example.com/feed/?category=go&paged=2",
 		},
 		{
 			"https://example.com/feed/?paged=4&category=go#part",
+			4,
 			"https://example.com/feed/?category=go&paged=5",
 		},
 		{
 			"https://example.com/feed/?paged=invalid",
+			1,
 			"https://example.com/feed/?paged=2",
+		},
+		{
+			"https://example.com/feed/",
+			int(^uint(0) >> 1),
+			"",
 		},
 	}
 	for _, tt := range tests {
-		if got := nextWordPressPageURL(tt.value); got != tt.want {
-			t.Errorf("nextWordPressPageURL(%q) = %q, want %q", tt.value, got, tt.want)
+		got, _ := nextWordPressPageURL(tt.value, tt.page)
+		if got != tt.want {
+			t.Errorf("nextWordPressPageURL(%q, %d) = %q, want %q", tt.value, tt.page, got, tt.want)
+		}
+	}
+}
+
+func TestCurrentWordPressPage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		value string
+		want  int
+	}{
+		{"https://example.com/feed/", 1},
+		{"https://example.com/feed/?paged=4", 4},
+		{"https://example.com/feed/?paged=invalid", 1},
+		{"https://example.com/feed/?paged=0", 1},
+	}
+	for _, tt := range tests {
+		if got := currentWordPressPage(tt.value); got != tt.want {
+			t.Errorf("currentWordPressPage(%q) = %d, want %d", tt.value, got, tt.want)
 		}
 	}
 }

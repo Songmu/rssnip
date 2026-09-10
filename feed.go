@@ -130,6 +130,7 @@ func fetchFeedPages(ctx context.Context, client *http.Client, feedURL string, ma
 	seenURLs := make(map[string]struct{})
 	nextURL := feedURL
 	mode := paginationNone
+	wordPressPage := 0
 	for page := 0; page < maxPages && nextURL != ""; page++ {
 		nextURL = paginationURL(nextURL)
 		if _, ok := seenURLs[nextURL]; ok {
@@ -161,7 +162,7 @@ func fetchFeedPages(ctx context.Context, client *http.Client, feedURL string, ma
 			if newItems == 0 {
 				nextURL = ""
 			} else {
-				nextURL = nextWordPressPageURL(sourceURL)
+				nextURL, wordPressPage = nextWordPressPageURL(sourceURL, wordPressPage)
 			}
 		default:
 			switch {
@@ -170,7 +171,8 @@ func fetchFeedPages(ctx context.Context, client *http.Client, feedURL string, ma
 				nextURL = followingURL
 			case wordPress && len(pageItems) > 0:
 				mode = paginationWordPress
-				nextURL = nextWordPressPageURL(sourceURL)
+				wordPressPage = currentWordPressPage(sourceURL)
+				nextURL, wordPressPage = nextWordPressPageURL(sourceURL, wordPressPage)
 			default:
 				nextURL = ""
 			}
@@ -530,19 +532,31 @@ func isWordPressGenerator(value string) bool {
 	return strings.EqualFold(generator.Hostname(), "wordpress.org")
 }
 
-func nextWordPressPageURL(value string) string {
+func currentWordPressPage(value string) int {
 	parsed, err := url.Parse(value)
 	if err != nil {
-		return ""
+		return 1
 	}
 	page := 1
 	if current, err := strconv.Atoi(parsed.Query().Get("paged")); err == nil && current > 0 {
 		page = current
 	}
+	return page
+}
+
+func nextWordPressPageURL(value string, currentPage int) (string, int) {
+	if currentPage < 1 || currentPage == int(^uint(0)>>1) {
+		return "", currentPage
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return "", currentPage
+	}
+	nextPage := currentPage + 1
 	query := parsed.Query()
-	query.Set("paged", strconv.Itoa(page+1))
+	query.Set("paged", strconv.Itoa(nextPage))
 	parsed.RawQuery = query.Encode()
-	return paginationURL(parsed.String())
+	return paginationURL(parsed.String()), nextPage
 }
 
 func isMissingWordPressPage(err error) bool {
