@@ -19,19 +19,25 @@ for pipelines, crawlers, and further processing with tools such as `jq`.
 
 ```console
 % rssnip --since 2024-01-01 --until 2024-01-31 \
-    --url https://example.com/feed.xml
+    https://example.com/feed.xml
 {"id":"...","url":"https://example.com/article","title":"Example","date_published":"2024-01-15T00:00:00Z"}
 
-% rssnip --url https://example.com/feed.xml --jq '.url' -r
+% rssnip --jq '.url' -r https://example.com/feed.xml
 https://example.com/article
 
 % printf '%s\n' https://example.com/feed.xml | rssnip
 {"id":"...","url":"https://example.com/article",...}
 
-% rssnip --with-feed --url https://example.com/feed.xml
+% rssnip --with-feed https://example.com/feed.xml
 {"id":"...","url":"https://example.com/article","title":"Example","_feed":{"title":"Example Feed","feed_url":"https://example.com/feed.xml"}}
 
-% rssnip --since 2024-01-01 --updated --url https://example.com/feed.xml
+% rssnip --max-pages 3 https://example.com/feed.xml
+
+% rssnip https://example.com/feed.xml https://example.org/feed.xml
+
+% printf '%s\n' https://example.org/feed.xml | rssnip https://example.com/feed.xml
+
+% rssnip --since 2024-01-01 --updated https://example.com/feed.xml
 {"id":"...","url":"https://example.com/revised","title":"Revised","date_published":"2023-12-20T00:00:00Z","date_modified":"2024-01-10T00:00:00Z"}
 ```
 
@@ -43,6 +49,7 @@ https://example.com/article
 - Atom 1.0
 - RDF/RSS 1.0
 - JSON Feed 1.0 and 1.1
+- Atom/RSS `rel="next"` and JSON Feed `next_url` pagination
 
 Each item follows the JSON Feed 1.1 item shape. By default, items do not
 include feed-level metadata. The `--with-feed` option adds the `_feed`
@@ -54,10 +61,91 @@ missing, a deterministic SHA-256 identifier is generated from the supported
 item fields before normalization. Unknown fields (including custom extensions)
 are ignored; changing a supported field changes the generated identifier.
 
-Every item is emitted as one compact JSON object per line. Feed URLs may be
-supplied by repeating `--url`, as positional arguments, one per line on
-standard input, or by combining any of these forms; output preserves feed and
-item order.
+Every item is emitted as one compact JSON object per line. Feed or blog/site
+URLs may be supplied as positional arguments, one per line on standard input,
+or by combining both forms. Positional URLs are processed first, followed by
+standard input URLs; duplicate input URLs are preserved, and output preserves
+feed and item order. Place all options before the first URL.
+When a URL returns an HTML page instead of a feed, `rssnip` scans
+`<link>` elements with `rel="alternate"` or `rel="feed"`. It selects the first
+eligible feed candidate in document order and fetches that single feed, not
+every linked feed. A `rel="alternate"` link qualifies through its media type,
+a feed-like filename/path token, or a standalone RSS/Atom word in its title.
+Fragments are removed from candidate URLs; links back to the same HTML document
+are skipped. Hostnames and IPv6 addresses are lowercased for comparison, but
+IPv6 zone identifiers retain their original spelling.
+The first `<base href>` applies to all links, even when its value is empty.
+If that base URL is malformed, links resolve against the page URL instead.
+HTML decoding uses HTTP charset or HTML metadata; XHTML decoding uses the BOM,
+HTTP charset, or XML declaration, defaulting to UTF-8. XHTML uses XML tokenization
+and the XHTML namespace; template contents are ignored in both formats.
+For HTML, links and bases in SVG/MathML are ignored unless they belong to HTML
+content, such as links inside SVG `title` or `foreignObject` integration points.
+If the selected URL fails to fetch or parse as a feed, the error is returned;
+later candidates are not retried. Pagination of the selected feed follows the
+same rules as a direct feed URL.
+Discovery is limited to the initial supplied URL. Pagination responses must be
+feeds; an HTML response on a later page is a parse error, not another discovery
+opportunity.
+
+Discovery scans the whole document before fetching a candidate. Decoding or
+scanning failures are reported rather than treated as missing links. In
+particular, malformed XHTML after an otherwise usable link now fails discovery;
+earlier versions stopped at the first candidate and could miss such errors.
+
+### Feed discovery library
+
+The public `github.com/Songmu/rssnip/feediscovery` package finds all advertised
+feed links without making HTTP requests or verifying feed contents:
+
+```go
+links, err := feediscovery.FindAll(
+    strings.NewReader(document),
+    "https://example.com/blog/",
+    "text/html; charset=utf-8",
+)
+if err != nil {
+    return err
+}
+for _, link := range links {
+    fmt.Println(link.URL, link.Title, link.Type)
+}
+```
+
+`pageURL` is the final document URL after redirects, used to resolve relative
+links and bases and to exclude links back to the same document. `contentType`
+is the document's HTTP Content-Type, including any charset; pass `""` when it
+is unknown. An HTTP caller can pass `resp.Body`, `resp.Request.URL.String()`,
+and `resp.Header.Get("Content-Type")`. The caller must close the body.
+
+Results preserve document order, duplicate URLs, and each link's decoded
+`title` and `type` attributes. `Link.Type` describes the advertised feed type,
+not the HTML document's Content-Type. Missing attributes remain empty; types
+are not inferred from filenames. The CLI still fetches only the first candidate.
+
+No matches return `nil, nil`. Read, size, decoding, or scanning failures return
+`nil, error`, never partial results. Oversized input can be identified with
+`errors.Is(err, feediscovery.ErrTooLarge)`.
+
+`FindAll` accepts an `io.Reader`, does not close it, and buffers the document for
+two scanning passes. Its `MaxDocumentSize` is 32 MiB before decoding; it reads at
+most one byte beyond the limit to detect overflow. This is not a total memory
+limit. Passing existing bytes with `bytes.NewReader(body)` creates an additional
+buffer inside the library. The caller controls network timeouts and cancellation.
+
+Tracked HTML namespace/template frames and XML element nesting are limited to
+`MaxNestingDepth` (512). Excessive nesting returns `ErrTooDeep`, which can be
+identified with `errors.Is`; no partial candidates are returned. This bounds
+parser state rather than imposing a depth limit on untracked ordinary HTML.
+
+### Pagination
+
+When a feed provides a standard next-page link, rssnip follows it and emits
+pages in order. It supports Atom link relations (including Atom links embedded
+in RSS) and JSON Feed `next_url`. It fetches at most 10 pages per supplied
+feed URL by default; use `--max-pages` to choose another positive limit.
+Repeated page URLs stop pagination, and duplicate item IDs across pages are
+emitted once.
 
 ### Output schema
 
@@ -147,7 +235,7 @@ picking up entries that were revised during the period even though they were
 published earlier.
 
 ```console
-% rssnip --since 2024-01-01 --updated --url https://example.com/feed.xml
+% rssnip --since 2024-01-01 --updated https://example.com/feed.xml
 ```
 
 The update date is `updated` in Atom and `date_modified` in JSON Feed. RSS 2.0
@@ -164,16 +252,16 @@ expression may emit zero, one, or multiple results. `-r` writes string results
 without JSON quoting and requires `--jq`.
 
 ```console
-% rssnip --url https://example.com/feed.xml \
-    --jq 'select(.tags | index("go")) | .url' -r
+% rssnip --jq 'select(.tags | index("go")) | .url' -r \
+    https://example.com/feed.xml
 https://example.com/go-article
 ```
 
 ### Initial scope
 
-The initial release fetches explicit feed URLs. HTML feed discovery, feed
-pagination, conditional requests, persistent caching, and natural-language
-date expressions are intentionally outside its scope.
+The initial release focuses on direct feed retrieval and HTML feed discovery.
+Conditional requests, persistent caching, and natural-language date expressions
+are intentionally outside its scope.
 
 ## Installation
 
