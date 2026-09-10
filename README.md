@@ -326,10 +326,13 @@ never installed automatically.
 
 Use `--prefix /path/to/skills` to choose a custom installation directory.
 `reinstall` replaces every managed rssnip skill even when its recorded version
-matches, while `uninstall` removes managed copies. Unmanaged skill directories
-are not overwritten unless `--force` is supplied. New skill content ships with
-new rssnip releases; installing a newer binary does not modify the user's skill
-directory until `rssnip skills update` or `reinstall` is run.
+matches, while `uninstall` removes managed copies. `install --force` may
+overwrite an unmanaged skill. `update` operates only on managed skills;
+`--force` does not make it overwrite an unmanaged skill or replace a newer
+managed version. `reinstall --force` may overwrite an unmanaged skill or
+replace a managed skill recorded at a newer version. New skill content ships
+with new rssnip releases; installing a newer binary does not modify the user's
+skill directory until `rssnip skills update` or `reinstall` is run.
 
 ## Installation
 

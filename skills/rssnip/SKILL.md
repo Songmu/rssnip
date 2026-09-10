@@ -104,5 +104,8 @@ rssnip skills update
 
 The default destination is `~/.agents/skills`. Use `--scope repo` for
 `<repo-root>/.agents/skills`, `--prefix` for a custom directory, and
-`--dry-run` to preview changes. Use `--force` only when intentionally
-overwriting an unmanaged skill or forcing a version change.
+`--dry-run` to preview changes. Use `install --force` to intentionally
+overwrite an unmanaged skill. `update` operates only on managed skills;
+`--force` does not make it overwrite an unmanaged skill or replace a newer
+managed version. Use `reinstall --force` when intentionally overwriting an
+unmanaged skill or replacing a managed skill recorded at a newer version.
