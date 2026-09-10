@@ -23,6 +23,7 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (ru
 }
 
 func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errStream io.Writer) (runErr error) {
+	startedAt := time.Now()
 	fs := flag.NewFlagSet(
 		fmt.Sprintf("%s (v%s rev:%s)", cmdName, version, revision), flag.ContinueOnError)
 	fs.SetOutput(errStream)
@@ -69,7 +70,7 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 
 	sinceInput := *sinceValue
 	if sinceInput == "" && *untilValue == "" && !*allItems {
-		sinceInput = time.Now().Add(-defaultSinceDays * 24 * time.Hour).UTC().Format(time.RFC3339Nano)
+		sinceInput = startedAt.Add(-defaultSinceDays * 24 * time.Hour).UTC().Format(time.RFC3339Nano)
 	}
 	if *allItems && (*sinceValue != "" || *untilValue != "") {
 		return fmt.Errorf("--all cannot be combined with --since or --until")
