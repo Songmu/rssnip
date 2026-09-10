@@ -202,3 +202,290 @@ func TestFetchFeedPagesStopsCycles(t *testing.T) {
 		t.Errorf("items = %#v", items)
 	}
 }
+
+func TestFetchFeedPagesFollowsWordPressPagination(t *testing.T) {
+	t.Parallel()
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.RequestURI())
+		if r.URL.Query().Get("category") != "go" {
+			http.Error(w, "missing category", http.StatusBadRequest)
+			return
+		}
+		switch r.URL.Query().Get("paged") {
+		case "":
+			w.Write([]byte(`<rss><channel><title>Feed</title><generator>https://wordpress.org/?v=7.1</generator><item><guid>one</guid></item><item><guid>duplicate</guid></item></channel></rss>`))
+		case "2":
+			w.Write([]byte(`<rss><channel><title>Feed</title><generator>https://wordpress.org/?v=7.1</generator><item><guid>duplicate</guid></item><item><guid>two</guid></item></channel></rss>`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	items, err := fetchFeedPages(context.Background(), server.Client(), server.URL+"/feed?category=go#part", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 3 || items[0].ID != "one" || items[1].ID != "duplicate" || items[2].ID != "two" {
+		t.Fatalf("items = %#v", items)
+	}
+	wantRequests := []string{"/feed?category=go", "/feed?category=go&paged=2", "/feed?category=go&paged=3"}
+	if strings.Join(requests, "\n") != strings.Join(wantRequests, "\n") {
+		t.Errorf("requests = %v, want %v", requests, wantRequests)
+	}
+	if items[2].Feed.FeedURL != server.URL+"/feed?category=go&paged=2" {
+		t.Errorf("second page feed URL = %q", items[2].Feed.FeedURL)
+	}
+}
+
+func TestFetchFeedPagesBoundsWordPressPagination(t *testing.T) {
+	t.Parallel()
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		page := r.URL.Query().Get("paged")
+		if page == "" {
+			page = "1"
+		}
+		w.Write([]byte(`<rss><channel><generator>https://wordpress.org/?v=7.1</generator><item><guid>` + page + `</guid></item></channel></rss>`))
+	}))
+	t.Cleanup(server.Close)
+
+	items, err := fetchFeedPages(context.Background(), server.Client(), server.URL+"/feed", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 || len(items) != 2 || items[0].ID != "1" || items[1].ID != "2" {
+		t.Errorf("requests = %d, items = %#v", requests, items)
+	}
+}
+
+func TestFetchFeedPagesWordPressTermination(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"not found", http.StatusNotFound, ""},
+		{"gone", http.StatusGone, ""},
+		{"empty feed", http.StatusOK, `<rss><channel><generator>https://wordpress.org/?v=7.1</generator></channel></rss>`},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var requests int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if r.URL.Query().Get("paged") == "" {
+					w.Write([]byte(`<rss><channel><generator>https://wordpress.org/?v=7.1</generator><item><guid>one</guid></item></channel></rss>`))
+					return
+				}
+				w.WriteHeader(tt.status)
+				w.Write([]byte(tt.body))
+			}))
+			t.Cleanup(server.Close)
+
+			items, err := fetchFeedPages(context.Background(), server.Client(), server.URL+"/feed", 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if requests != 2 || len(items) != 1 || items[0].ID != "one" {
+				t.Errorf("requests = %d, items = %#v", requests, items)
+			}
+		})
+	}
+}
+
+func TestFetchFeedPagesEmptyWordPressFeedDoesNotGuess(t *testing.T) {
+	t.Parallel()
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Write([]byte(`<rss><channel><generator>https://wordpress.org/?v=7.1</generator></channel></rss>`))
+	}))
+	t.Cleanup(server.Close)
+
+	items, err := fetchFeedPages(context.Background(), server.Client(), server.URL+"/feed", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 || len(items) != 0 {
+		t.Errorf("requests = %d, items = %#v", requests, items)
+	}
+}
+
+func TestFetchFeedPagesStopsUnchangedWordPressPagination(t *testing.T) {
+	t.Parallel()
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Write([]byte(`<rss><channel><generator>https://wordpress.org/?v=7.1</generator><item><guid>one</guid></item><item><guid>two</guid></item></channel></rss>`))
+	}))
+	t.Cleanup(server.Close)
+
+	items, err := fetchFeedPages(context.Background(), server.Client(), server.URL+"/feed", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 {
+		t.Errorf("requests = %d, want 2", requests)
+	}
+	if len(items) != 2 || items[0].ID != "one" || items[1].ID != "two" {
+		t.Errorf("items = %#v", items)
+	}
+}
+
+func TestFetchFeedPagesWordPressFallbackPreservesErrors(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		status int
+		body   string
+		want   string
+	}{
+		{"server error", http.StatusInternalServerError, "", "500 Internal Server Error"},
+		{"malformed feed", http.StatusOK, "not a feed", "parse feed"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("paged") == "" {
+					w.Write([]byte(`<rss><channel><generator>https://wordpress.org/?v=7.1</generator><item><guid>one</guid></item></channel></rss>`))
+					return
+				}
+				w.WriteHeader(tt.status)
+				w.Write([]byte(tt.body))
+			}))
+			t.Cleanup(server.Close)
+
+			items, err := fetchFeedPages(context.Background(), server.Client(), server.URL+"/feed", 10)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("items = %#v, error = %v, want error containing %q", items, err, tt.want)
+			}
+			if items != nil {
+				t.Errorf("items = %#v, want nil on error", items)
+			}
+		})
+	}
+}
+
+func TestFetchFeedPagesWordPressExplicitPaginationTakesPrecedence(t *testing.T) {
+	t.Parallel()
+	var guessedRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Has("paged") {
+			guessedRequests++
+		}
+		switch r.URL.Path {
+		case "/one":
+			w.Write([]byte(`<rss xmlns:atom="http://www.w3.org/2005/Atom"><channel><generator>https://wordpress.org/?v=7.1</generator><atom:link rel="next" href="/two"/><item><guid>one</guid></item></channel></rss>`))
+		case "/two":
+			w.Write([]byte(`<rss><channel><generator>https://wordpress.org/?v=7.1</generator><item><guid>two</guid></item></channel></rss>`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	items, err := fetchFeedPages(context.Background(), server.Client(), server.URL+"/one", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if guessedRequests != 0 || len(items) != 2 || items[0].ID != "one" || items[1].ID != "two" {
+		t.Errorf("guessed requests = %d, items = %#v", guessedRequests, items)
+	}
+}
+
+func TestFetchFeedPagesDoesNotGuessForNonWordPressFeeds(t *testing.T) {
+	t.Parallel()
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Write([]byte(`<rss><channel><generator>https://example.com/generator</generator><item><guid>one</guid></item></channel></rss>`))
+	}))
+	t.Cleanup(server.Close)
+
+	items, err := fetchFeedPages(context.Background(), server.Client(), server.URL+"/feed", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 || len(items) != 1 || items[0].ID != "one" {
+		t.Errorf("requests = %d, items = %#v", requests, items)
+	}
+}
+
+func TestFetchFeedPagesWordPressFallbackUsesDiscoveredRedirectURL(t *testing.T) {
+	t.Parallel()
+	var pagedRequest string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/blog":
+			w.Header().Set("Content-Type", "text/html")
+			w.Write([]byte(`<html><head><link rel="feed" href="/redirect"></head></html>`))
+		case "/redirect":
+			http.Redirect(w, r, "/feed?category=go", http.StatusFound)
+		case "/feed":
+			switch r.URL.Query().Get("paged") {
+			case "":
+				w.Write([]byte(`<rss><channel><generator>https://wordpress.org/?v=7.1</generator><item><guid>one</guid></item></channel></rss>`))
+			case "2":
+				pagedRequest = r.URL.RequestURI()
+				w.Write([]byte(`<rss><channel><generator>https://wordpress.org/?v=7.1</generator><item><guid>two</guid></item></channel></rss>`))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	items, err := fetchFeedPages(context.Background(), server.Client(), server.URL+"/blog", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pagedRequest != "/feed?category=go&paged=2" {
+		t.Errorf("paged request = %q", pagedRequest)
+	}
+	if len(items) != 2 || items[0].ID != "one" || items[1].ID != "two" {
+		t.Errorf("items = %#v", items)
+	}
+}
+
+func TestFetchFeedPagesWordPressRedirectKeepsGuessedPageNumber(t *testing.T) {
+	t.Parallel()
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.RequestURI())
+		switch {
+		case r.URL.Path == "/feed" && r.URL.Query().Get("paged") == "":
+			w.Write([]byte(`<rss><channel><generator>https://wordpress.org/?v=7.1</generator><item><guid>one</guid></item></channel></rss>`))
+		case r.URL.Path == "/feed" && r.URL.Query().Get("paged") == "2":
+			http.Redirect(w, r, "/canonical", http.StatusFound)
+		case r.URL.Path == "/canonical" && r.URL.Query().Get("paged") == "":
+			w.Write([]byte(`<rss><channel><generator>https://wordpress.org/?v=7.1</generator><item><guid>two</guid></item></channel></rss>`))
+		case r.URL.Path == "/canonical" && r.URL.Query().Get("paged") == "3":
+			w.Write([]byte(`<rss><channel><generator>https://wordpress.org/?v=7.1</generator><item><guid>three</guid></item></channel></rss>`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	items, err := fetchFeedPages(context.Background(), server.Client(), server.URL+"/feed", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 3 || items[0].ID != "one" || items[1].ID != "two" || items[2].ID != "three" {
+		t.Fatalf("items = %#v", items)
+	}
+	wantRequests := []string{"/feed", "/feed?paged=2", "/canonical", "/canonical?paged=3", "/canonical?paged=4"}
+	if strings.Join(requests, "\n") != strings.Join(wantRequests, "\n") {
+		t.Errorf("requests = %v, want %v", requests, wantRequests)
+	}
+}

@@ -27,6 +27,24 @@ const userAgent = "rssnip/" + version
 const maxFeedSize = 32 << 20
 const defaultMaxPages = 10
 
+type httpStatusError struct {
+	url        string
+	status     string
+	statusCode int
+}
+
+func (err *httpStatusError) Error() string {
+	return fmt.Sprintf("fetch %q: unexpected HTTP status %s", displayURL(err.url), err.status)
+}
+
+type paginationMode int
+
+const (
+	paginationNone paginationMode = iota
+	paginationExplicit
+	paginationWordPress
+)
+
 // Item is a feed entry normalized to the JSON Feed 1.1 item shape.
 type Item struct {
 	ID            string       `json:"id"`
@@ -111,6 +129,8 @@ func fetchFeedPages(ctx context.Context, client *http.Client, feedURL string, ma
 	seenItems := make(map[string]struct{})
 	seenURLs := make(map[string]struct{})
 	nextURL := feedURL
+	mode := paginationNone
+	wordPressPage := 0
 	for page := 0; page < maxPages && nextURL != ""; page++ {
 		nextURL = paginationURL(nextURL)
 		if _, ok := seenURLs[nextURL]; ok {
@@ -118,51 +138,79 @@ func fetchFeedPages(ctx context.Context, client *http.Client, feedURL string, ma
 		}
 		seenURLs[nextURL] = struct{}{}
 
-		pageItems, sourceURL, followingURL, err := fetchFeedPage(ctx, client, nextURL, page == 0)
+		pageItems, sourceURL, followingURL, wordPress, err := fetchFeedPage(ctx, client, nextURL, page == 0)
 		if err != nil {
+			if mode == paginationWordPress && isMissingWordPressPage(err) {
+				break
+			}
 			return nil, err
 		}
 		seenURLs[paginationURL(sourceURL)] = struct{}{}
+		newItems := 0
 		for _, item := range pageItems {
 			if _, ok := seenItems[item.ID]; ok {
 				continue
 			}
 			seenItems[item.ID] = struct{}{}
 			items = append(items, item)
+			newItems++
 		}
-		nextURL = followingURL
+		switch mode {
+		case paginationExplicit:
+			nextURL = followingURL
+		case paginationWordPress:
+			// The initial feed selects the pagination mode. Ignore later rel=next
+			// links rather than switching schemes in the middle of the sequence.
+			if newItems == 0 {
+				nextURL = ""
+			} else {
+				nextURL, wordPressPage = nextWordPressPageURL(sourceURL, wordPressPage)
+			}
+		default:
+			switch {
+			case followingURL != "":
+				mode = paginationExplicit
+				nextURL = followingURL
+			case wordPress && len(pageItems) > 0:
+				mode = paginationWordPress
+				wordPressPage = currentWordPressPage(sourceURL)
+				nextURL, wordPressPage = nextWordPressPageURL(sourceURL, wordPressPage)
+			default:
+				nextURL = ""
+			}
+		}
 	}
 	return items, nil
 }
 
-func fetchFeedPage(ctx context.Context, client *http.Client, feedURL string, allowDiscovery bool) ([]Item, string, string, error) {
+func fetchFeedPage(ctx context.Context, client *http.Client, feedURL string, allowDiscovery bool) ([]Item, string, string, bool, error) {
 	body, sourceURL, contentType, err := fetchFeedDocument(ctx, client, feedURL)
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", "", false, err
 	}
-	items, parseErr := parseFeed(body, sourceURL)
+	items, generator, parseErr := parseFeedDetails(body, sourceURL)
 	if parseErr != nil {
 		if !allowDiscovery {
-			return nil, "", "", parseErr
+			return nil, "", "", false, parseErr
 		}
 		links, discoveryErr := feediscovery.FindAll(bytes.NewReader(body), sourceURL, contentType)
 		if discoveryErr != nil {
-			return nil, "", "", fmt.Errorf("%w; discover feed links: %w", parseErr, discoveryErr)
+			return nil, "", "", false, fmt.Errorf("%w; discover feed links: %w", parseErr, discoveryErr)
 		}
 		if len(links) == 0 {
-			return nil, "", "", parseErr
+			return nil, "", "", false, parseErr
 		}
 		body, sourceURL, _, err = fetchFeedDocument(ctx, client, links[0].URL)
 		if err != nil {
-			return nil, "", "", err
+			return nil, "", "", false, err
 		}
-		items, err = parseFeed(body, sourceURL)
+		items, generator, err = parseFeedDetails(body, sourceURL)
 		if err != nil {
-			return nil, "", "", err
+			return nil, "", "", false, err
 		}
 	}
 	nextURL, _ := nextPageURL(body, sourceURL)
-	return items, sourceURL, nextURL, nil
+	return items, sourceURL, nextURL, isWordPressGenerator(generator), nil
 }
 
 func fetchFeedDocument(ctx context.Context, client *http.Client, feedURL string) ([]byte, string, string, error) {
@@ -197,7 +245,11 @@ func fetchFeedDocument(ctx context.Context, client *http.Client, feedURL string)
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-		return nil, "", "", fmt.Errorf("fetch %q: unexpected HTTP status %s", displayURL(feedURL), resp.Status)
+		return nil, "", "", &httpStatusError{
+			url:        feedURL,
+			status:     resp.Status,
+			statusCode: resp.StatusCode,
+		}
 	}
 	if resp.ContentLength > maxFeedSize {
 		return nil, "", "", fmt.Errorf("read %q: feed exceeds %d MiB limit", displayURL(feedURL), maxFeedSize>>20)
@@ -218,27 +270,32 @@ func fetchFeedDocument(ctx context.Context, client *http.Client, feedURL string)
 }
 
 func parseFeed(body []byte, sourceURL string) ([]Item, error) {
+	items, _, err := parseFeedDetails(body, sourceURL)
+	return items, err
+}
+
+func parseFeedDetails(body []byte, sourceURL string) ([]Item, string, error) {
 	body = bytes.TrimPrefix(body, []byte{0xef, 0xbb, 0xbf})
 	if looksLikeJSON(body) {
 		items, recognized, err := parseJSONFeed(body, sourceURL)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if !recognized {
-			return nil, fmt.Errorf("parse feed %q: JSON document is not a supported JSON Feed", sourceURL)
+			return nil, "", fmt.Errorf("parse feed %q: JSON document is not a supported JSON Feed", sourceURL)
 		}
-		return items, nil
+		return items, "", nil
 	}
 
 	parser := gofeed.NewParser()
 	parser.KeepOriginalFeed = true
 	normalized, err := normalizeAtomDocument(body, sourceURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse feed %q: %w", sourceURL, err)
+		return nil, "", fmt.Errorf("parse feed %q: %w", sourceURL, err)
 	}
 	feed, err := parser.Parse(bytes.NewReader(normalized))
 	if err != nil {
-		return nil, fmt.Errorf("parse feed %q: %w", sourceURL, err)
+		return nil, "", fmt.Errorf("parse feed %q: %w", sourceURL, err)
 	}
 	info := FeedInfo{
 		Title:       feed.Title,
@@ -318,7 +375,7 @@ func parseFeed(body []byte, sourceURL string) ([]Item, error) {
 		}
 		items = append(items, item)
 	}
-	return items, nil
+	return items, feed.Generator, nil
 }
 
 func looksLikeJSON(body []byte) bool {
@@ -464,6 +521,50 @@ func paginationURL(value string) string {
 	}
 	parsed.Fragment, parsed.RawFragment = "", ""
 	return parsed.String()
+}
+
+func isWordPressGenerator(value string) bool {
+	generator, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || generator.User != nil {
+		return false
+	}
+	if !strings.EqualFold(generator.Scheme, "http") && !strings.EqualFold(generator.Scheme, "https") {
+		return false
+	}
+	return strings.EqualFold(generator.Hostname(), "wordpress.org")
+}
+
+func currentWordPressPage(value string) int {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return 1
+	}
+	page := 1
+	if current, err := strconv.Atoi(parsed.Query().Get("paged")); err == nil && current > 0 {
+		page = current
+	}
+	return page
+}
+
+func nextWordPressPageURL(value string, currentPage int) (string, int) {
+	if currentPage < 1 || currentPage == int(^uint(0)>>1) {
+		return "", currentPage
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return "", currentPage
+	}
+	nextPage := currentPage + 1
+	query := parsed.Query()
+	query.Set("paged", strconv.Itoa(nextPage))
+	parsed.RawQuery = query.Encode()
+	return paginationURL(parsed.String()), nextPage
+}
+
+func isMissingWordPressPage(err error) bool {
+	var statusErr *httpStatusError
+	return errors.As(err, &statusErr) &&
+		(statusErr.statusCode == http.StatusNotFound || statusErr.statusCode == http.StatusGone)
 }
 
 func normalizeAttachment(attachment Attachment) (Attachment, bool) {
