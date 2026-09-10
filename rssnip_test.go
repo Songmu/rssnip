@@ -20,13 +20,13 @@ func TestRunFiltersAndAppliesRawJQ(t *testing.T) {
 	t.Parallel()
 	server := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
 	var stdout, stderr bytes.Buffer
-	err := Run(context.Background(), []string{
+	err := runInLocation(context.Background(), []string{
 		"--since", "2024-01-01",
-		"--until", "2024-01-31",
+		"--until", "2024-02-01",
 		"--jq", ".url",
 		"-r",
 		server.URL,
-	}, &stdout, &stderr)
+	}, strings.NewReader(""), &stdout, &stderr, time.UTC)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,6 +66,34 @@ func TestRunUsesDefaultSinceAndSupportsAll(t *testing.T) {
 				t.Errorf("stdout = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestRunInterpretsDateBoundsInLocation(t *testing.T) {
+	t.Parallel()
+	server := newFeedServer(t, `<?xml version="1.0"?><rss version="2.0"><channel>
+		<item><guid>before</guid><pubDate>Sun, 31 Dec 2023 14:59:59 GMT</pubDate></item>
+		<item><guid>start</guid><pubDate>Sun, 31 Dec 2023 15:00:00 GMT</pubDate></item>
+		<item><guid>inside</guid><pubDate>Mon, 01 Jan 2024 14:59:59 GMT</pubDate></item>
+		<item><guid>until</guid><pubDate>Mon, 01 Jan 2024 15:00:00 GMT</pubDate></item>
+	</channel></rss>`)
+	location := time.FixedZone("UTC+09", 9*60*60)
+	var stdout, stderr bytes.Buffer
+	err := runInLocation(context.Background(), []string{
+		"--since", "2024-01-01",
+		"--until", "2024-01-02",
+		"--jq", ".id",
+		"-r",
+		server.URL,
+	}, strings.NewReader(""), &stdout, &stderr, location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := stdout.String(), "start\ninside\n"; got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q", stderr.String())
 	}
 }
 
@@ -470,12 +498,12 @@ func TestRunPrefersPublishedDateUnlessUpdatedRequested(t *testing.T) {
 	}{
 		{
 			name: "published by default",
-			args: []string{"--since", "2024-01-01", "--until", "2024-01-31", "--jq", ".id", "-r", server.URL},
+			args: []string{"--since", "2024-01-01T00:00:00Z", "--until", "2024-02-01T00:00:00Z", "--jq", ".id", "-r", server.URL},
 			want: "published-in-range\nupdated-only\n",
 		},
 		{
 			name: "updated when requested",
-			args: []string{"--since", "2024-01-01", "--until", "2024-01-31", "--updated", "--jq", ".id", "-r", server.URL},
+			args: []string{"--since", "2024-01-01T00:00:00Z", "--until", "2024-02-01T00:00:00Z", "--updated", "--jq", ".id", "-r", server.URL},
 			want: "updated-in-range\nupdated-only\n",
 		},
 	}
@@ -517,7 +545,7 @@ func TestRunSinceStopsOrderedPagination(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	err := Run(context.Background(), []string{
-		"--since", "2024-03-01",
+		"--since", "2024-03-01T00:00:00Z",
 		"--jq", ".id",
 		"-r",
 		server.URL + "/one",

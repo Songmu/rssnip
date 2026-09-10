@@ -22,10 +22,15 @@ func mustReadTestdata(t *testing.T, name string) []byte {
 	return data
 }
 
-// mustParseTimeBound parses a time bound and fails the test immediately on error.
-func mustParseTimeBound(t *testing.T, value string, endOfDay bool) *time.Time {
+// mustParseTimeBound parses a UTC time bound and fails the test immediately on error.
+func mustParseTimeBound(t *testing.T, value string) *time.Time {
 	t.Helper()
-	bound, err := parseTimeBound(value, endOfDay)
+	return mustParseTimeBoundInLocation(t, value, time.UTC)
+}
+
+func mustParseTimeBoundInLocation(t *testing.T, value string, location *time.Location) *time.Time {
+	t.Helper()
+	bound, err := parseTimeBound(value, location)
 	if err != nil {
 		t.Fatal(err)
 	}

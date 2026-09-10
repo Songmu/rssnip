@@ -1,12 +1,15 @@
 // This file covers date parsing and period-based filtering of items.
 package rssnip
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestWithinPeriod(t *testing.T) {
 	t.Parallel()
-	since := mustParseTimeBound(t, "2024-01-01", false)
-	until := mustParseTimeBound(t, "2024-01-31", true)
+	since := mustParseTimeBound(t, "2024-01-01")
+	until := mustParseTimeBound(t, "2024-02-01")
 	tests := []struct {
 		date string
 		want bool
@@ -25,9 +28,46 @@ func TestWithinPeriod(t *testing.T) {
 	}
 }
 
+func TestParseTimeBoundUsesLocationForDateOnly(t *testing.T) {
+	t.Parallel()
+	location := time.FixedZone("UTC+09", 9*60*60)
+	got := mustParseTimeBoundInLocation(t, "2024-01-01", location)
+	want := time.Date(2024, time.January, 1, 0, 0, 0, 0, location)
+	if !got.Equal(want) || got.Location() != location {
+		t.Errorf("parseTimeBound() = %v in %v, want %v in %v",
+			got, got.Location(), want, location)
+	}
+}
+
+func TestParseTimeBoundKeepsRFC3339Offset(t *testing.T) {
+	t.Parallel()
+	location := time.FixedZone("UTC+09", 9*60*60)
+	got := mustParseTimeBoundInLocation(t, "2024-01-01T12:00:00-05:00", location)
+	_, offset := got.Zone()
+	if offset != -5*60*60 {
+		t.Errorf("offset = %d, want %d", offset, -5*60*60)
+	}
+}
+
+func TestParseTimeBoundRejectsTimezoneLessDatetime(t *testing.T) {
+	t.Parallel()
+	if _, err := parseTimeBound("2024-01-01T12:00:00", time.UTC); err == nil {
+		t.Fatal("timezone-less datetime should be rejected")
+	}
+}
+
+func TestWithinPeriodAllowsEmptyEqualBounds(t *testing.T) {
+	t.Parallel()
+	bound := mustParseTimeBound(t, "2024-01-01T00:00:00Z")
+	item := Item{DatePublished: "2024-01-01T00:00:00Z"}
+	if withinPeriod(item, bound, bound, false) {
+		t.Error("an equal since and until must form an empty period")
+	}
+}
+
 func TestWithinPeriodFallsBackToModifiedDate(t *testing.T) {
 	t.Parallel()
-	since := mustParseTimeBound(t, "2024-01-01", false)
+	since := mustParseTimeBound(t, "2024-01-01")
 	item := Item{
 		DatePublished: "not-rfc3339",
 		DateModified:  "2024-01-15T12:00:00Z",
@@ -39,8 +79,8 @@ func TestWithinPeriodFallsBackToModifiedDate(t *testing.T) {
 
 func TestWithinPeriodPrefersPublishedDateByDefault(t *testing.T) {
 	t.Parallel()
-	since := mustParseTimeBound(t, "2024-01-01", false)
-	until := mustParseTimeBound(t, "2024-01-31", true)
+	since := mustParseTimeBound(t, "2024-01-01")
+	until := mustParseTimeBound(t, "2024-02-01")
 	item := Item{
 		DatePublished: "2023-12-01T00:00:00Z",
 		DateModified:  "2024-01-15T12:00:00Z",
@@ -55,8 +95,8 @@ func TestWithinPeriodPrefersPublishedDateByDefault(t *testing.T) {
 
 func TestWithinPeriodPreferUpdatedFallsBackToPublishedDate(t *testing.T) {
 	t.Parallel()
-	since := mustParseTimeBound(t, "2024-01-01", false)
-	until := mustParseTimeBound(t, "2024-01-31", true)
+	since := mustParseTimeBound(t, "2024-01-01")
+	until := mustParseTimeBound(t, "2024-02-01")
 	item := Item{DatePublished: "2024-01-15T12:00:00Z"}
 	if !withinPeriod(item, since, until, true) {
 		t.Error("publication date should be used when no modification date is available")
@@ -76,7 +116,7 @@ func TestFractionalSecondDates(t *testing.T) {
 	if got := normalizeDate(value); got != value {
 		t.Errorf("normalizeDate(%q) = %q", value, got)
 	}
-	since := mustParseTimeBound(t, "2024-01-15T12:00:00.123Z", false)
+	since := mustParseTimeBound(t, "2024-01-15T12:00:00.123Z")
 	if !withinPeriod(Item{DatePublished: value}, since, nil, false) {
 		t.Error("fractional-second item should be included")
 	}
@@ -84,7 +124,7 @@ func TestFractionalSecondDates(t *testing.T) {
 
 func TestDateOrderCandidateRequiresFiveComparableItems(t *testing.T) {
 	t.Parallel()
-	since := mustParseTimeBound(t, "2024-01-10", false)
+	since := mustParseTimeBound(t, "2024-01-10")
 	var candidate dateOrderCandidate
 	for _, value := range []string{
 		"2024-01-12T00:00:00Z",
@@ -107,7 +147,7 @@ func TestDateOrderCandidateRequiresFiveComparableItems(t *testing.T) {
 
 func TestDateOrderCandidateRejectsLaterIncrease(t *testing.T) {
 	t.Parallel()
-	since := mustParseTimeBound(t, "2024-01-10", false)
+	since := mustParseTimeBound(t, "2024-01-10")
 	var candidate dateOrderCandidate
 	for _, value := range []string{
 		"2024-01-14T00:00:00Z",
@@ -159,7 +199,7 @@ func TestPaginationDateOrderNarrowsCandidates(t *testing.T) {
 
 func TestPaginationDateOrderIgnoresMissingDates(t *testing.T) {
 	t.Parallel()
-	since := mustParseTimeBound(t, "2024-01-10", false)
+	since := mustParseTimeBound(t, "2024-01-10")
 	order := newPaginationDateOrder()
 	order.observe(Item{DatePublished: "2024-01-12T00:00:00Z"})
 	order.observe(Item{})
@@ -177,7 +217,7 @@ func TestPaginationDateOrderIgnoresMissingDates(t *testing.T) {
 
 func TestPaginationDateOrderUsesModeSpecificCandidate(t *testing.T) {
 	t.Parallel()
-	since := mustParseTimeBound(t, "2024-03-01", false)
+	since := mustParseTimeBound(t, "2024-03-01")
 	order := newPaginationDateOrder()
 	for _, item := range []Item{
 		{
@@ -217,7 +257,7 @@ func TestPaginationDateOrderUsesModeSpecificCandidate(t *testing.T) {
 
 func TestPaginationDateOrderRejectsInvalidModifiedBound(t *testing.T) {
 	t.Parallel()
-	since := mustParseTimeBound(t, "2024-03-01", false)
+	since := mustParseTimeBound(t, "2024-03-01")
 	order := newPaginationDateOrder()
 	for _, item := range []Item{
 		{
@@ -256,7 +296,7 @@ func TestPaginationDateOrderRejectsInvalidModifiedBound(t *testing.T) {
 
 func TestPaginationDateOrderKeepsSinceInclusive(t *testing.T) {
 	t.Parallel()
-	since := mustParseTimeBound(t, "2024-01-10", false)
+	since := mustParseTimeBound(t, "2024-01-10")
 	order := newPaginationDateOrder()
 	for _, value := range []string{
 		"2024-01-14T00:00:00Z",

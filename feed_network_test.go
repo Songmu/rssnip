@@ -288,7 +288,7 @@ func TestFetchFeedPagesStopsWhenSinceOrderIsExhausted(t *testing.T) {
 		},
 	}
 
-	since := mustParseTimeBound(t, "2024-03-01", false)
+	since := mustParseTimeBound(t, "2024-03-01")
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {

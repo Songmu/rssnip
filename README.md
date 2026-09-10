@@ -18,7 +18,7 @@ for pipelines, crawlers, and further processing with tools such as `jq`.
 ## Synopsis
 
 ```console
-% rssnip --since 2024-01-01 --until 2024-01-31 \
+% rssnip --since 2024-01-01 --until 2024-02-01 \
     https://example.com/feed.xml
 {"id":"...","url":"https://example.com/article","title":"Example","date_published":"2024-01-15T00:00:00Z"}
 
@@ -246,11 +246,16 @@ Without `--jq`, each JSON Lines record conforms to this JSON Schema:
 
 ### Date filtering
 
-`--since` and `--until` accept RFC 3339 timestamps or `YYYY-MM-DD` dates. Both
-boundaries are inclusive. Date-only values are interpreted in UTC, and a
-date-only `--until` includes the entire day. When neither boundary is given,
-`--since` defaults to seven days before startup. Use `--all` to disable this
-default and fetch all available items (up to `--max-pages`).
+`--since` and `--until` accept RFC 3339 timestamps or `YYYY-MM-DD` dates. The
+period is half-open: `--since` is inclusive and `--until` is exclusive.
+Date-only values are interpreted as midnight in the local time zone selected
+by the operating system. For example, `--since 2024-01-01 --until 2024-02-01`
+selects January in local time. For a portable fixed UTC interpretation, provide
+RFC 3339 bounds such as `--since 2024-01-01T00:00:00Z --until
+2024-02-01T00:00:00Z`. On Unix-like systems, `TZ=UTC` also makes date-only
+values use UTC. When neither boundary is given, `--since` defaults to seven
+days before startup. Use `--all` to disable this default and fetch all
+available items (up to `--max-pages`).
 
 Each item is filtered by a single date. The publication date is preferred, and
 the update date is used only when the publication date is missing or
