@@ -103,6 +103,60 @@ func TestParseFeedRejectsUnsupportedJSON(t *testing.T) {
 	}
 }
 
+func TestWordPressGeneratorDetection(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		value string
+		want  bool
+	}{
+		{"https://wordpress.org/?v=7.1", true},
+		{"HTTP://WORDPRESS.ORG/?v=7.1", true},
+		{"https://wordpress.org:443/?v=7.1", true},
+		{"https://wordpress.com/?v=7.1", false},
+		{"https://feeds.wordpress.org/?v=7.1", false},
+		{"https://wordpress.org.example/?v=7.1", false},
+		{"https://wordpress.org@evil.example/?v=7.1", false},
+		{"wordpress.org/?v=7.1", false},
+		{"WordPress 7.1", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isWordPressGenerator(tt.value); got != tt.want {
+			t.Errorf("isWordPressGenerator(%q) = %t, want %t", tt.value, got, tt.want)
+		}
+	}
+}
+
+func TestNextWordPressPageURL(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		value string
+		want  string
+	}{
+		{
+			"https://example.com/feed/#part",
+			"https://example.com/feed/?paged=2",
+		},
+		{
+			"https://example.com/feed/?category=go",
+			"https://example.com/feed/?category=go&paged=2",
+		},
+		{
+			"https://example.com/feed/?paged=4&category=go#part",
+			"https://example.com/feed/?category=go&paged=5",
+		},
+		{
+			"https://example.com/feed/?paged=invalid",
+			"https://example.com/feed/?paged=2",
+		},
+	}
+	for _, tt := range tests {
+		if got := nextWordPressPageURL(tt.value); got != tt.want {
+			t.Errorf("nextWordPressPageURL(%q) = %q, want %q", tt.value, got, tt.want)
+		}
+	}
+}
+
 func TestRSSItemsWithoutStableIdentityAreRejected(t *testing.T) {
 	t.Parallel()
 	body := mustReadTestdata(t, "rss_no_stable_identity.xml")

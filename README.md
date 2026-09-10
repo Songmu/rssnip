@@ -142,10 +142,22 @@ parser state rather than imposing a depth limit on untracked ordinary HTML.
 
 When a feed provides a standard next-page link, rssnip follows it and emits
 pages in order. It supports Atom link relations (including Atom links embedded
-in RSS) and JSON Feed `next_url`. It fetches at most 10 pages per supplied
-feed URL by default; use `--max-pages` to choose another positive limit.
-Repeated page URLs stop pagination, and duplicate item IDs across pages are
-emitted once.
+in RSS) and JSON Feed `next_url`.
+
+For an XML feed without an explicit next-page link, rssnip also recognizes a
+WordPress feed when its feed-level `generator` is an HTTP(S) URL on
+`wordpress.org`. It then preserves the feed URL's other query parameters and
+tries successive `paged=2`, `paged=3`, and later URLs. Explicit pagination
+always takes precedence; rssnip does not switch to guessed WordPress URLs after
+an explicit pagination chain ends. A guessed page returning HTTP 404 or 410, or
+a successfully parsed page that contributes no new item IDs, ends pagination
+normally. This stops servers that accept `paged` but repeatedly return the same
+content; partially overlapping pages continue when they contain at least one
+new item. Other fetching and parsing failures remain errors.
+
+It fetches at most 10 pages per supplied feed URL by default; use `--max-pages`
+to choose another positive limit. Repeated page URLs stop pagination, and
+duplicate item IDs across pages are emitted once.
 
 ### Output schema
 
