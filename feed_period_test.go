@@ -81,3 +81,197 @@ func TestFractionalSecondDates(t *testing.T) {
 		t.Error("fractional-second item should be included")
 	}
 }
+
+func TestDateOrderCandidateRequiresFiveComparableItems(t *testing.T) {
+	t.Parallel()
+	since := mustParseTimeBound(t, "2024-01-10", false)
+	var candidate dateOrderCandidate
+	for _, value := range []string{
+		"2024-01-12T00:00:00Z",
+		"2024-01-11T00:00:00Z",
+		"2024-01-10T00:00:00Z",
+		"2024-01-09T00:00:00Z",
+	} {
+		itemTime, ok := parseItemDate(value)
+		candidate.observe(itemTime, ok)
+	}
+	if candidate.exhausted(*since) {
+		t.Error("four comparable items must not enable early termination")
+	}
+	itemTime, ok := parseItemDate("2024-01-08T00:00:00Z")
+	candidate.observe(itemTime, ok)
+	if !candidate.exhausted(*since) {
+		t.Error("five non-increasing comparable items before since should enable early termination")
+	}
+}
+
+func TestDateOrderCandidateRejectsLaterIncrease(t *testing.T) {
+	t.Parallel()
+	since := mustParseTimeBound(t, "2024-01-10", false)
+	var candidate dateOrderCandidate
+	for _, value := range []string{
+		"2024-01-14T00:00:00Z",
+		"2024-01-13T00:00:00Z",
+		"2024-01-12T00:00:00Z",
+		"2024-01-11T00:00:00Z",
+		"2024-01-09T00:00:00Z",
+		"2024-01-11T00:00:00Z",
+		"2024-01-07T00:00:00Z",
+	} {
+		itemTime, ok := parseItemDate(value)
+		candidate.observe(itemTime, ok)
+	}
+	if candidate.exhausted(*since) {
+		t.Error("an ordering candidate must remain rejected after a later increase")
+	}
+}
+
+func TestPaginationDateOrderNarrowsCandidates(t *testing.T) {
+	t.Parallel()
+	order := newPaginationDateOrder()
+	for _, item := range []Item{
+		{
+			DatePublished: "2024-01-12T00:00:00Z",
+			DateModified:  "2024-01-15T00:00:00Z",
+		},
+		{
+			DatePublished: "2024-01-11T00:00:00Z",
+			DateModified:  "2024-01-14T00:00:00Z",
+		},
+		{
+			DatePublished: "2024-01-10T00:00:00Z",
+			DateModified:  "2024-01-13T00:00:00Z",
+		},
+		{
+			DatePublished: "2024-01-11T12:00:00Z",
+			DateModified:  "2024-01-12T00:00:00Z",
+		},
+	} {
+		order.observe(item)
+	}
+	if !order.published.rejected {
+		t.Error("published ordering should be rejected by the later increase")
+	}
+	if order.modified.rejected {
+		t.Error("modified ordering should remain viable")
+	}
+}
+
+func TestPaginationDateOrderIgnoresMissingDates(t *testing.T) {
+	t.Parallel()
+	since := mustParseTimeBound(t, "2024-01-10", false)
+	order := newPaginationDateOrder()
+	order.observe(Item{DatePublished: "2024-01-12T00:00:00Z"})
+	order.observe(Item{})
+	order.observe(Item{DatePublished: "2024-01-11T00:00:00Z"})
+	order.observe(Item{DatePublished: "2024-01-10T00:00:00Z"})
+	order.observe(Item{DatePublished: "2024-01-09T00:00:00Z"})
+	if order.exhausted(*since, false) {
+		t.Error("an item without a date must not count toward the five-item threshold")
+	}
+	order.observe(Item{DatePublished: "2024-01-08T00:00:00Z"})
+	if !order.exhausted(*since, false) {
+		t.Error("five comparable items across missing dates should enable termination")
+	}
+}
+
+func TestPaginationDateOrderUsesModeSpecificCandidate(t *testing.T) {
+	t.Parallel()
+	since := mustParseTimeBound(t, "2024-03-01", false)
+	order := newPaginationDateOrder()
+	for _, item := range []Item{
+		{
+			DatePublished: "2024-01-01T00:00:00Z",
+			DateModified:  "2024-03-03T00:00:00Z",
+		},
+		{
+			DatePublished: "2024-02-20T00:00:00Z",
+			DateModified:  "2024-03-02T00:00:00Z",
+		},
+		{
+			DatePublished: "2024-01-15T00:00:00Z",
+			DateModified:  "2024-02-28T00:00:00Z",
+		},
+		{
+			DatePublished: "2024-01-14T00:00:00Z",
+			DateModified:  "2024-02-27T00:00:00Z",
+		},
+		{
+			DatePublished: "2024-01-13T00:00:00Z",
+			DateModified:  "2024-02-26T00:00:00Z",
+		},
+	} {
+		order.observe(item)
+	}
+	if !order.published.rejected || order.modified.rejected {
+		t.Fatalf("candidate states = published rejected %t, modified rejected %t",
+			order.published.rejected, order.modified.rejected)
+	}
+	if !order.exhausted(*since, false) {
+		t.Error("modified ordering should bound ordinary published filtering")
+	}
+	if !order.exhausted(*since, true) {
+		t.Error("modified ordering should terminate updated filtering")
+	}
+}
+
+func TestPaginationDateOrderRejectsInvalidModifiedBound(t *testing.T) {
+	t.Parallel()
+	since := mustParseTimeBound(t, "2024-03-01", false)
+	order := newPaginationDateOrder()
+	for _, item := range []Item{
+		{
+			DatePublished: "2024-02-01T00:00:00Z",
+			DateModified:  "2024-03-03T00:00:00Z",
+		},
+		{
+			DatePublished: "2024-02-20T00:00:00Z",
+			DateModified:  "2024-03-02T00:00:00Z",
+		},
+		{
+			DatePublished: "2024-02-10T00:00:00Z",
+			DateModified:  "2024-02-28T00:00:00Z",
+		},
+		{
+			DatePublished: "2024-02-15T00:00:00Z",
+			DateModified:  "2024-02-14T00:00:00Z",
+		},
+		{
+			DatePublished: "2024-02-13T00:00:00Z",
+			DateModified:  "2024-02-12T00:00:00Z",
+		},
+	} {
+		order.observe(item)
+	}
+	if order.modifiedBoundsPublished {
+		t.Fatal("published after modified must invalidate the modified upper bound")
+	}
+	if order.exhausted(*since, false) {
+		t.Error("ordinary filtering must not use an invalid modified upper bound")
+	}
+	if !order.exhausted(*since, true) {
+		t.Error("updated filtering may still use valid modified ordering")
+	}
+}
+
+func TestPaginationDateOrderKeepsSinceInclusive(t *testing.T) {
+	t.Parallel()
+	since := mustParseTimeBound(t, "2024-01-10", false)
+	order := newPaginationDateOrder()
+	for _, value := range []string{
+		"2024-01-14T00:00:00Z",
+		"2024-01-13T00:00:00Z",
+		"2024-01-12T00:00:00Z",
+		"2024-01-11T00:00:00Z",
+		"2024-01-10T00:00:00Z",
+	} {
+		order.observe(Item{DatePublished: value})
+	}
+	if order.exhausted(*since, false) {
+		t.Error("an item equal to since must not trigger termination")
+	}
+	order.observe(Item{DatePublished: "2024-01-09T23:59:59Z"})
+	if !order.exhausted(*since, false) {
+		t.Error("a strictly older tail should trigger termination")
+	}
+}

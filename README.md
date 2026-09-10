@@ -159,6 +159,18 @@ It fetches at most 10 pages per supplied feed URL by default; use `--max-pages`
 to choose another positive limit. Repeated page URLs stop pagination, and
 duplicate item IDs across pages are emitted once.
 
+When `--since` is present, rssnip can also stop before `--max-pages` after
+observing at least five comparable item dates in newest-first order. The order
+is checked continuously across page boundaries. Normal date filtering can use
+either publication order, or modification order while every observed
+publication date is no later than its modification date. With `--updated`, only
+modification order can stop pagination. Items without a parseable publication
+or modification date do not contribute to the five-item threshold.
+
+This is intentionally a best-effort optimization based on the fetched prefix:
+feed pagination does not guarantee that an unseen later page preserves the
+observed order, so a matching item on such an out-of-order page may be omitted.
+
 ### Output schema
 
 Without `--jq`, each JSON Lines record conforms to this JSON Schema:
@@ -256,6 +268,13 @@ element is recognized; an item carrying neither falls back to its publication
 date. Items with no parseable date at all are omitted when a date filter is
 active. Unparseable JSON Feed timestamps are omitted from normalized output
 even when no date filter is active.
+
+For ordered paginated feeds, `--since` uses the observed date order to avoid
+fetching pages that cannot contain another matching item, as described under
+[Pagination](#pagination). The page that crosses the boundary is processed
+and checked in full before pagination stops, so a later ordering violation on
+that page disables the optimization. An item dated exactly at `--since` remains
+included.
 
 ### jq filtering
 
