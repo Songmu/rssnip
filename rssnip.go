@@ -84,7 +84,8 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	for _, feedURL := range urls {
-		feedItems, err := fetchFeedPages(ctx, client, feedURL, *maxPages)
+		feedItems, err := fetchFeedPagesSince(
+			ctx, client, feedURL, *maxPages, since, *preferUpdated)
 		if err != nil {
 			return err
 		}

@@ -5,6 +5,7 @@ package rssnip
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -171,6 +172,148 @@ func TestFetchFeedPagesBoundsAndDeduplicates(t *testing.T) {
 	}
 	if len(items) != 3 || items[0].ID != "one" || items[1].ID != "duplicate" || items[2].ID != "two" {
 		t.Errorf("items = %#v", items)
+	}
+}
+
+func TestFetchFeedPagesStopsWhenSinceOrderIsExhausted(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name          string
+		pages         []string
+		preferUpdated bool
+		wantRequests  int
+		wantItems     int
+	}{
+		{
+			name: "published order",
+			pages: []string{
+				`[{"id":"one","date_published":"2024-03-03T00:00:00Z"},{"id":"two","date_published":"2024-03-02T00:00:00Z"}]`,
+				`[{"id":"three","date_published":"2024-03-01T00:00:00Z"},{"id":"four","date_published":"2024-02-28T00:00:00Z"}]`,
+				`[{"id":"five","date_published":"2024-02-27T00:00:00Z"}]`,
+			},
+			wantRequests: 2,
+			wantItems:    4,
+		},
+		{
+			name: "modified order bounds published filtering",
+			pages: []string{
+				`[{"id":"one","date_published":"2024-02-20T00:00:00Z","date_modified":"2024-03-03T00:00:00Z"},{"id":"two","date_published":"2024-02-19T00:00:00Z","date_modified":"2024-03-02T00:00:00Z"}]`,
+				`[{"id":"three","date_published":"2024-02-25T00:00:00Z","date_modified":"2024-02-28T00:00:00Z"}]`,
+				`[{"id":"four","date_published":"2024-01-10T00:00:00Z","date_modified":"2024-02-27T00:00:00Z"}]`,
+			},
+			wantRequests: 2,
+			wantItems:    3,
+		},
+		{
+			name: "modified order with updated filtering",
+			pages: []string{
+				`[{"id":"one","date_published":"2024-01-01T00:00:00Z","date_modified":"2024-03-03T00:00:00Z"},{"id":"two","date_published":"2024-02-20T00:00:00Z","date_modified":"2024-03-02T00:00:00Z"}]`,
+				`[{"id":"three","date_published":"2024-01-15T00:00:00Z","date_modified":"2024-02-28T00:00:00Z"}]`,
+				`[{"id":"four","date_published":"2024-01-10T00:00:00Z","date_modified":"2024-02-27T00:00:00Z"}]`,
+			},
+			preferUpdated: true,
+			wantRequests:  2,
+			wantItems:     3,
+		},
+		{
+			name: "published order cannot terminate updated filtering",
+			pages: []string{
+				`[{"id":"one","date_published":"2024-03-03T00:00:00Z","date_modified":"2024-02-01T00:00:00Z"},{"id":"two","date_published":"2024-03-02T00:00:00Z","date_modified":"2024-02-03T00:00:00Z"}]`,
+				`[{"id":"three","date_published":"2024-02-28T00:00:00Z","date_modified":"2024-02-02T00:00:00Z"}]`,
+				`[{"id":"four","date_published":"2024-02-27T00:00:00Z","date_modified":"2024-03-04T00:00:00Z"}]`,
+			},
+			preferUpdated: true,
+			wantRequests:  3,
+			wantItems:     4,
+		},
+		{
+			name: "invalid modified bound continues ordinary filtering",
+			pages: []string{
+				`[{"id":"one","date_published":"2024-02-20T00:00:00Z","date_modified":"2024-03-03T00:00:00Z"},{"id":"two","date_published":"2024-02-19T00:00:00Z","date_modified":"2024-03-02T00:00:00Z"}]`,
+				`[{"id":"three","date_published":"2024-02-25T00:00:00Z","date_modified":"2024-02-28T00:00:00Z"},{"id":"four","date_published":"2024-02-27T00:00:00Z","date_modified":"2024-02-26T00:00:00Z"}]`,
+				`[{"id":"five","date_published":"2024-02-18T00:00:00Z","date_modified":"2024-02-25T00:00:00Z"}]`,
+			},
+			wantRequests: 3,
+			wantItems:    5,
+		},
+		{
+			name: "missing dates do not reach threshold",
+			pages: []string{
+				`[{"id":"one","date_published":"2024-03-03T00:00:00Z"},{"id":"missing"}]`,
+				`[{"id":"two","date_published":"2024-02-28T00:00:00Z"},{"id":"also-missing"}]`,
+				`[{"id":"three","date_published":"2024-02-27T00:00:00Z"}]`,
+			},
+			wantRequests: 3,
+			wantItems:    5,
+		},
+		{
+			name: "duplicate IDs still provide ordering evidence",
+			pages: []string{
+				`[{"id":"one","date_published":"2024-03-03T00:00:00Z"},{"id":"duplicate","date_published":"2024-03-02T00:00:00Z"}]`,
+				`[{"id":"duplicate","date_published":"2024-02-28T00:00:00Z"}]`,
+				`[{"id":"three","date_published":"2024-02-27T00:00:00Z"}]`,
+			},
+			wantRequests: 2,
+			wantItems:    2,
+		},
+		{
+			name: "since equality continues pagination",
+			pages: []string{
+				`[{"id":"one","date_published":"2024-03-03T00:00:00Z"},{"id":"two","date_published":"2024-03-02T00:00:00Z"}]`,
+				`[{"id":"three","date_published":"2024-03-01T00:00:00Z"}]`,
+				`[{"id":"four","date_published":"2024-02-28T00:00:00Z"}]`,
+			},
+			wantRequests: 3,
+			wantItems:    4,
+		},
+		{
+			name: "rejected candidates continue to max pages",
+			pages: []string{
+				`[{"id":"one","date_published":"2024-03-03T00:00:00Z","date_modified":"2024-03-03T00:00:00Z"},{"id":"two","date_published":"2024-02-28T00:00:00Z","date_modified":"2024-02-28T00:00:00Z"}]`,
+				`[{"id":"three","date_published":"2024-03-02T00:00:00Z","date_modified":"2024-03-02T00:00:00Z"}]`,
+				`[{"id":"four","date_published":"2024-02-27T00:00:00Z","date_modified":"2024-02-27T00:00:00Z"}]`,
+			},
+			wantRequests: 3,
+			wantItems:    4,
+		},
+	}
+
+	since := mustParseTimeBound(t, "2024-03-01", false)
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var requests int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				page := requests - 1
+				if page >= len(tt.pages) {
+					http.NotFound(w, r)
+					return
+				}
+				nextURL := ""
+				if page+1 < len(tt.pages) {
+					nextURL = fmt.Sprintf(`,"next_url":"/page/%d"`, page+2)
+				}
+				fmt.Fprintf(w,
+					`{"version":"https://jsonfeed.org/version/1.1"%s,"items":%s}`,
+					nextURL, tt.pages[page])
+			}))
+			t.Cleanup(server.Close)
+
+			items, err := fetchFeedPagesSince(
+				context.Background(), server.Client(), server.URL+"/page/1",
+				len(tt.pages), since, tt.preferUpdated)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if requests != tt.wantRequests {
+				t.Errorf("requests = %d, want %d", requests, tt.wantRequests)
+			}
+			if len(items) != tt.wantItems {
+				t.Errorf("items = %d, want %d: %#v", len(items), tt.wantItems, items)
+			}
+		})
 	}
 }
 

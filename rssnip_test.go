@@ -465,6 +465,45 @@ func TestRunPrefersPublishedDateUnlessUpdatedRequested(t *testing.T) {
 	}
 }
 
+func TestRunSinceStopsOrderedPagination(t *testing.T) {
+	t.Parallel()
+	var requests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		switch r.URL.Path {
+		case "/one":
+			fmt.Fprint(w, `{"version":"https://jsonfeed.org/version/1.1","next_url":"/two","items":[{"id":"one","date_published":"2024-03-03T00:00:00Z"},{"id":"two","date_published":"2024-03-02T00:00:00Z"}]}`)
+		case "/two":
+			fmt.Fprint(w, `{"version":"https://jsonfeed.org/version/1.1","next_url":"/three","items":[{"id":"three","date_published":"2024-03-01T00:00:00Z"},{"id":"old","date_published":"2024-02-28T00:00:00Z"}]}`)
+		case "/three":
+			fmt.Fprint(w, `{"version":"https://jsonfeed.org/version/1.1","items":[{"id":"unrequested","date_published":"2024-02-27T00:00:00Z"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{
+		"--since", "2024-03-01",
+		"--jq", ".id",
+		"-r",
+		server.URL + "/one",
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 {
+		t.Errorf("requests = %d, want 2", requests)
+	}
+	if got, want := stdout.String(), "one\ntwo\nthree\n"; got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q", stderr.String())
+	}
+}
+
 func TestRunErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

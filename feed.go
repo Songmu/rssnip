@@ -45,6 +45,58 @@ const (
 	paginationWordPress
 )
 
+type dateOrderCandidate struct {
+	previous time.Time
+	count    int
+	rejected bool
+}
+
+func (candidate *dateOrderCandidate) observe(itemTime time.Time, ok bool) {
+	if !ok {
+		return
+	}
+	if candidate.count > 0 && itemTime.After(candidate.previous) {
+		candidate.rejected = true
+	}
+	candidate.previous = itemTime
+	candidate.count++
+}
+
+func (candidate *dateOrderCandidate) exhausted(since time.Time) bool {
+	return !candidate.rejected && candidate.count >= 3 && candidate.previous.Before(since)
+}
+
+type paginationDateOrder struct {
+	published               dateOrderCandidate
+	modified                dateOrderCandidate
+	modifiedBoundsPublished bool
+}
+
+func newPaginationDateOrder() paginationDateOrder {
+	return paginationDateOrder{modifiedBoundsPublished: true}
+}
+
+func (order *paginationDateOrder) observe(item Item) {
+	published, publishedOK := filterDate(item, false)
+	modified, modifiedOK := filterDate(item, true)
+	order.published.observe(published, publishedOK)
+	order.modified.observe(modified, modifiedOK)
+
+	directPublished, directPublishedOK := parseItemDate(item.DatePublished)
+	directModified, directModifiedOK := parseItemDate(item.DateModified)
+	if directPublishedOK && directModifiedOK && directPublished.After(directModified) {
+		order.modifiedBoundsPublished = false
+	}
+}
+
+func (order *paginationDateOrder) exhausted(since time.Time, preferUpdated bool) bool {
+	if preferUpdated {
+		return order.modified.exhausted(since)
+	}
+	return order.published.exhausted(since) ||
+		(order.modifiedBoundsPublished && order.modified.exhausted(since))
+}
+
 // Item is a feed entry normalized to the JSON Feed 1.1 item shape.
 type Item struct {
 	ID            string       `json:"id"`
@@ -125,12 +177,24 @@ func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]Item
 }
 
 func fetchFeedPages(ctx context.Context, client *http.Client, feedURL string, maxPages int) ([]Item, error) {
+	return fetchFeedPagesSince(ctx, client, feedURL, maxPages, nil, false)
+}
+
+func fetchFeedPagesSince(
+	ctx context.Context,
+	client *http.Client,
+	feedURL string,
+	maxPages int,
+	since *time.Time,
+	preferUpdated bool,
+) ([]Item, error) {
 	items := make([]Item, 0)
 	seenItems := make(map[string]struct{})
 	seenURLs := make(map[string]struct{})
 	nextURL := feedURL
 	mode := paginationNone
 	wordPressPage := 0
+	order := newPaginationDateOrder()
 	for page := 0; page < maxPages && nextURL != ""; page++ {
 		nextURL = paginationURL(nextURL)
 		if _, ok := seenURLs[nextURL]; ok {
@@ -148,6 +212,9 @@ func fetchFeedPages(ctx context.Context, client *http.Client, feedURL string, ma
 		seenURLs[paginationURL(sourceURL)] = struct{}{}
 		newItems := 0
 		for _, item := range pageItems {
+			if since != nil {
+				order.observe(item)
+			}
 			if _, ok := seenItems[item.ID]; ok {
 				continue
 			}
@@ -178,6 +245,9 @@ func fetchFeedPages(ctx context.Context, client *http.Client, feedURL string, ma
 			default:
 				nextURL = ""
 			}
+		}
+		if since != nil && order.exhausted(*since, preferUpdated) {
+			break
 		}
 	}
 	return items, nil
@@ -710,14 +780,19 @@ func filterDate(item Item, preferUpdated bool) (time.Time, bool) {
 		candidates = [2]string{item.DateModified, item.DatePublished}
 	}
 	for _, dateValue := range candidates {
-		if dateValue == "" {
-			continue
-		}
-		if itemTime, err := time.Parse(time.RFC3339Nano, dateValue); err == nil {
+		if itemTime, ok := parseItemDate(dateValue); ok {
 			return itemTime, true
 		}
 	}
 	return time.Time{}, false
+}
+
+func parseItemDate(value string) (time.Time, bool) {
+	if value == "" {
+		return time.Time{}, false
+	}
+	itemTime, err := time.Parse(time.RFC3339Nano, value)
+	return itemTime, err == nil
 }
 
 func withinPeriod(item Item, since, until *time.Time, preferUpdated bool) bool {
