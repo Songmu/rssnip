@@ -300,6 +300,37 @@ The initial release focuses on direct feed retrieval and HTML feed discovery.
 Conditional requests, persistent caching, and natural-language date expressions
 are intentionally outside its scope.
 
+## Agent Skill
+
+The rssnip binary includes an English [Agent Skill](https://agentskills.io/)
+that teaches compatible coding agents how to select options, combine feeds,
+filter dates, and build jq pipelines with rssnip. The skill is managed through
+the bundled [skillsmith](https://github.com/Songmu/skillsmith) subcommand and is
+never installed automatically.
+
+```console
+# Inspect the skill bundled with this rssnip release.
+% rssnip skills list
+
+# Install it for the current user under ~/.agents/skills.
+% rssnip skills install
+
+# Install it under the current repository's .agents/skills directory.
+% rssnip skills install --scope repo
+
+# Preview a change, check status, and apply an updated bundled version.
+% rssnip skills update --dry-run
+% rssnip skills status
+% rssnip skills update
+```
+
+Use `--prefix /path/to/skills` to choose a custom installation directory.
+`reinstall` replaces every managed rssnip skill even when its recorded version
+matches, while `uninstall` removes managed copies. Unmanaged skill directories
+are not overwritten unless `--force` is supplied. New skill content ships with
+new rssnip releases; installing a newer binary does not modify the user's skill
+directory until `rssnip skills update` or `reinstall` is run.
+
 ## Installation
 
 ```console

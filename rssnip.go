@@ -33,6 +33,10 @@ func runInLocation(
 	outStream, errStream io.Writer,
 	location *time.Location,
 ) (runErr error) {
+	if len(argv) > 0 && argv[0] == "skills" {
+		return runSkills(ctx, argv[1:], outStream, errStream)
+	}
+
 	startedAt := time.Now()
 	fs := flag.NewFlagSet(
 		fmt.Sprintf("%s (v%s rev:%s)", cmdName, version, revision), flag.ContinueOnError)
@@ -42,6 +46,7 @@ func runInLocation(
 		fmt.Fprintln(fs.Output(), "Feed or blog/site URLs may be supplied as positional arguments")
 		fmt.Fprintln(fs.Output(), "or one per line on standard input. Positional URLs are processed first.")
 		fmt.Fprintln(fs.Output(), "Place options before URLs. HTML pages are searched for a feed link.")
+		fmt.Fprintf(fs.Output(), "\nManage the bundled Agent Skill with '%s skills <command>'.\n", cmdName)
 		fmt.Fprintln(fs.Output(), "Options:")
 		fs.PrintDefaults()
 	}
