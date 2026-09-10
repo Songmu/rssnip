@@ -52,7 +52,7 @@ func TestRunPreservesCanceledFetch(t *testing.T) {
 	cancel()
 	server := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
 	var stdout, stderr strings.Builder
-	err := Run(ctx, []string{server.URL}, &stdout, &stderr)
+	err := Run(ctx, []string{"--all", server.URL}, &stdout, &stderr)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want wrapped context.Canceled", err)
 	}

@@ -248,8 +248,9 @@ Without `--jq`, each JSON Lines record conforms to this JSON Schema:
 
 `--since` and `--until` accept RFC 3339 timestamps or `YYYY-MM-DD` dates. Both
 boundaries are inclusive. Date-only values are interpreted in UTC, and a
-date-only `--until` includes the entire day. No date filter is applied by
-default.
+date-only `--until` includes the entire day. When neither boundary is given,
+`--since` defaults to seven days before startup. Use `--all` to disable this
+default and fetch all available items (up to `--max-pages`).
 
 Each item is filtered by a single date. The publication date is preferred, and
 the update date is used only when the publication date is missing or

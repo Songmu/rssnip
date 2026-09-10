@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"testing/iotest"
+	"time"
 )
 
 func TestRunFiltersAndAppliesRawJQ(t *testing.T) {
@@ -38,6 +39,36 @@ func TestRunFiltersAndAppliesRawJQ(t *testing.T) {
 	}
 }
 
+func TestRunUsesDefaultSinceAndSupportsAll(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	feed := fmt.Sprintf(`<?xml version="1.0"?><rss version="2.0"><channel>
+		<item><guid>recent</guid><title>Recent</title><pubDate>%s</pubDate></item>
+		<item><guid>old</guid><title>Old</title><pubDate>%s</pubDate></item>
+	</channel></rss>`, now.Add(-24*time.Hour).Format(time.RFC1123Z), now.Add(-8*24*time.Hour).Format(time.RFC1123Z))
+	server := newFeedServer(t, feed)
+	until := now.Add(-7 * 24 * time.Hour).Format(time.RFC3339)
+	for _, tt := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "default", args: []string{"--jq", ".id", "-r", server.URL}, want: "recent\n"},
+		{name: "all", args: []string{"--all", "--jq", ".id", "-r", server.URL}, want: "recent\nold\n"},
+		{name: "until only", args: []string{"--until", until, "--jq", ".id", "-r", server.URL}, want: "old\n"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if err := Run(context.Background(), tt.args, &stdout, &stderr); err != nil {
+				t.Fatal(err)
+			}
+			if got := stdout.String(); got != tt.want {
+				t.Errorf("stdout = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRunDiscoversFeedFromBlogURL(t *testing.T) {
 	t.Parallel()
 	testRSS := string(mustReadTestdata(t, "sample_rss.xml"))
@@ -59,7 +90,7 @@ func TestRunDiscoversFeedFromBlogURL(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	var stdout, stderr bytes.Buffer
-	err := Run(context.Background(), []string{"--with-feed", "--jq", "._feed.feed_url", "-r", server.URL}, &stdout, &stderr)
+	err := Run(context.Background(), []string{"--all", "--with-feed", "--jq", "._feed.feed_url", "-r", server.URL}, &stdout, &stderr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +118,7 @@ func TestRunDiscoversFeedFromBlogURLWithBaseHref(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	var stdout, stderr bytes.Buffer
-	err := Run(context.Background(), []string{"--with-feed", "--jq", "._feed.feed_url", "-r", server.URL + "/blog/"}, &stdout, &stderr)
+	err := Run(context.Background(), []string{"--all", "--with-feed", "--jq", "._feed.feed_url", "-r", server.URL + "/blog/"}, &stdout, &stderr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +146,7 @@ func TestRunDiscoversFeedFromRelFeedLink(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	var stdout, stderr bytes.Buffer
-	err := Run(context.Background(), []string{"--with-feed", "--jq", "._feed.feed_url", "-r", server.URL}, &stdout, &stderr)
+	err := Run(context.Background(), []string{"--all", "--with-feed", "--jq", "._feed.feed_url", "-r", server.URL}, &stdout, &stderr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +174,7 @@ func TestRunDiscoversFeedFromBOMPrefixedHTML(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	var stdout, stderr bytes.Buffer
-	err := Run(context.Background(), []string{"--with-feed", "--jq", "._feed.feed_url", "-r", server.URL}, &stdout, &stderr)
+	err := Run(context.Background(), []string{"--all", "--with-feed", "--jq", "._feed.feed_url", "-r", server.URL}, &stdout, &stderr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +205,7 @@ func TestRunDiscoversFeedFromNonUTF8HTML(t *testing.T) {
 	t.Cleanup(server.Close)
 
 	var stdout, stderr bytes.Buffer
-	err := Run(context.Background(), []string{"--with-feed", "--jq", "._feed.feed_url", "-r", server.URL + "/blog/"}, &stdout, &stderr)
+	err := Run(context.Background(), []string{"--all", "--with-feed", "--jq", "._feed.feed_url", "-r", server.URL + "/blog/"}, &stdout, &stderr)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +251,7 @@ func TestRunAcceptsURLInputs(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			args := append([]string{"--with-feed", "--jq", "._feed.title", "-r"}, tt.urls...)
+			args := append([]string{"--all", "--with-feed", "--jq", "._feed.title", "-r"}, tt.urls...)
 			var stdout, stderr bytes.Buffer
 			if err := run(context.Background(), args, strings.NewReader(tt.stdin), &stdout, &stderr); err != nil {
 				t.Fatal(err)
@@ -256,7 +287,7 @@ func TestRunJQFeedMetadataIsOptIn(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			var stdout, stderr bytes.Buffer
-			args := []string{"--jq", `if .id == "before" then has("_feed") else empty end`}
+			args := []string{"--all", "--jq", `if .id == "before" then has("_feed") else empty end`}
 			if tt.withFeed {
 				args = append(args, "--with-feed")
 			}
@@ -277,7 +308,7 @@ func TestRunPreservesMultipleFeedOrder(t *testing.T) {
 	firstServer := newFeedServer(t, testRSS)
 	secondServer := newFeedServer(t, strings.Replace(testRSS, "<guid>before</guid>", "<guid>other</guid>", 1))
 	var stdout, stderr bytes.Buffer
-	if err := Run(context.Background(), []string{"--with-feed", firstServer.URL, secondServer.URL}, &stdout, &stderr); err != nil {
+	if err := Run(context.Background(), []string{"--all", "--with-feed", firstServer.URL, secondServer.URL}, &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
@@ -304,6 +335,7 @@ func TestRunJQCanEmitZeroOrMultipleValues(t *testing.T) {
 	server := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
 	var stdout, stderr bytes.Buffer
 	err := Run(context.Background(), []string{
+		"--all",
 		"--jq", `if .id == "first" then empty elif .id == "second" then [.id, "second-extra"][] else empty end`,
 		"-r",
 		server.URL,
@@ -322,7 +354,7 @@ func TestRunStreamsJSONLinesBeforeLaterFeedFailure(t *testing.T) {
 	goodServer := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
 	badServer := newBadGatewayServer(t)
 	var stdout, stderr bytes.Buffer
-	err := Run(context.Background(), []string{goodServer.URL, badServer.URL}, &stdout, &stderr)
+	err := Run(context.Background(), []string{"--all", goodServer.URL, badServer.URL}, &stdout, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "502 Bad Gateway") {
 		t.Fatalf("error = %v", err)
 	}
@@ -335,7 +367,7 @@ func TestRunWritesJSONLinesWithoutFeedMetadataByDefault(t *testing.T) {
 	t.Parallel()
 	server := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
 	var stdout, stderr bytes.Buffer
-	if err := Run(context.Background(), []string{server.URL}, &stdout, &stderr); err != nil {
+	if err := Run(context.Background(), []string{"--all", server.URL}, &stdout, &stderr); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
@@ -516,7 +548,7 @@ func TestRunErrors(t *testing.T) {
 		{"removed JSON option", []string{"--json", "https://example.com/feed"}, "flag provided but not defined: -json"},
 		{"invalid since", []string{"--since", "yesterday", "https://example.com/feed"}, "invalid --since"},
 		{"reversed period", []string{"--since", "2024-02-01", "--until", "2024-01-01", "https://example.com/feed"}, "--since must not be after --until"},
-		{"updated without period", []string{"--updated", "https://example.com/feed"}, "--updated requires --since or --until"},
+		{"all with date filter", []string{"--all", "--since", "2024-01-01", "https://example.com/feed"}, "--all cannot be combined with --since or --until"},
 		{"invalid URL", []string{"--jq", ".", "://bad"}, "invalid feed URL"},
 		{"relative URL", []string{"feed.xml"}, "invalid feed URL"},
 		{"non-HTTP URL", []string{"ftp://example.com/feed"}, "invalid feed URL"},
@@ -543,7 +575,7 @@ func TestRunReportsHTTPError(t *testing.T) {
 	t.Parallel()
 	server := newBadGatewayServer(t)
 	var stdout, stderr bytes.Buffer
-	err := Run(context.Background(), []string{server.URL}, &stdout, &stderr)
+	err := Run(context.Background(), []string{"--all", server.URL}, &stdout, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "502 Bad Gateway") {
 		t.Fatalf("error = %v", err)
 	}
@@ -557,7 +589,7 @@ func TestRunRejectsOversizedFeed(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	var stdout, stderr bytes.Buffer
-	err := Run(context.Background(), []string{server.URL}, &stdout, &stderr)
+	err := Run(context.Background(), []string{"--all", server.URL}, &stdout, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "feed exceeds 32 MiB limit") {
 		t.Fatalf("error = %v", err)
 	}
@@ -567,7 +599,7 @@ func TestRunReportsInvalidJQ(t *testing.T) {
 	t.Parallel()
 	server := newFeedServer(t, string(mustReadTestdata(t, "sample_rss.xml")))
 	var stdout, stderr bytes.Buffer
-	err := Run(context.Background(), []string{"--jq", "[", server.URL}, &stdout, &stderr)
+	err := Run(context.Background(), []string{"--all", "--jq", "[", server.URL}, &stdout, &stderr)
 	if err == nil || !strings.Contains(err.Error(), "parse --jq expression") {
 		t.Fatalf("error = %v", err)
 	}
