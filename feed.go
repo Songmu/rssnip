@@ -159,6 +159,8 @@ func fetchFeedPages(ctx context.Context, client *http.Client, feedURL string, ma
 		case paginationExplicit:
 			nextURL = followingURL
 		case paginationWordPress:
+			// The initial feed selects the pagination mode. Ignore later rel=next
+			// links rather than switching schemes in the middle of the sequence.
 			if newItems == 0 {
 				nextURL = ""
 			} else {
