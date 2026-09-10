@@ -26,6 +26,7 @@ import (
 const userAgent = "rssnip/" + version
 const maxFeedSize = 32 << 20
 const defaultMaxPages = 10
+const minDateOrderSamples = 5
 
 type httpStatusError struct {
 	url        string
@@ -63,7 +64,9 @@ func (candidate *dateOrderCandidate) observe(itemTime time.Time, ok bool) {
 }
 
 func (candidate *dateOrderCandidate) exhausted(since time.Time) bool {
-	return !candidate.rejected && candidate.count >= 3 && candidate.previous.Before(since)
+	return !candidate.rejected &&
+		candidate.count >= minDateOrderSamples &&
+		candidate.previous.Before(since)
 }
 
 type paginationDateOrder struct {

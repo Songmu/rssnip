@@ -187,33 +187,33 @@ func TestFetchFeedPagesStopsWhenSinceOrderIsExhausted(t *testing.T) {
 		{
 			name: "published order",
 			pages: []string{
-				`[{"id":"one","date_published":"2024-03-03T00:00:00Z"},{"id":"two","date_published":"2024-03-02T00:00:00Z"}]`,
-				`[{"id":"three","date_published":"2024-03-01T00:00:00Z"},{"id":"four","date_published":"2024-02-28T00:00:00Z"}]`,
-				`[{"id":"five","date_published":"2024-02-27T00:00:00Z"}]`,
+				`[{"id":"one","date_published":"2024-03-05T00:00:00Z"},{"id":"two","date_published":"2024-03-04T00:00:00Z"},{"id":"three","date_published":"2024-03-03T00:00:00Z"}]`,
+				`[{"id":"four","date_published":"2024-03-01T00:00:00Z"},{"id":"five","date_published":"2024-02-28T00:00:00Z"}]`,
+				`[{"id":"six","date_published":"2024-02-27T00:00:00Z"}]`,
 			},
 			wantRequests: 2,
-			wantItems:    4,
+			wantItems:    5,
 		},
 		{
 			name: "modified order bounds published filtering",
 			pages: []string{
 				`[{"id":"one","date_published":"2024-02-20T00:00:00Z","date_modified":"2024-03-03T00:00:00Z"},{"id":"two","date_published":"2024-02-19T00:00:00Z","date_modified":"2024-03-02T00:00:00Z"}]`,
-				`[{"id":"three","date_published":"2024-02-25T00:00:00Z","date_modified":"2024-02-28T00:00:00Z"}]`,
-				`[{"id":"four","date_published":"2024-01-10T00:00:00Z","date_modified":"2024-02-27T00:00:00Z"}]`,
+				`[{"id":"three","date_published":"2024-02-25T00:00:00Z","date_modified":"2024-02-28T00:00:00Z"},{"id":"four","date_published":"2024-02-18T00:00:00Z","date_modified":"2024-02-27T00:00:00Z"},{"id":"five","date_published":"2024-02-17T00:00:00Z","date_modified":"2024-02-26T00:00:00Z"}]`,
+				`[{"id":"six","date_published":"2024-01-10T00:00:00Z","date_modified":"2024-02-25T00:00:00Z"}]`,
 			},
 			wantRequests: 2,
-			wantItems:    3,
+			wantItems:    5,
 		},
 		{
 			name: "modified order with updated filtering",
 			pages: []string{
 				`[{"id":"one","date_published":"2024-01-01T00:00:00Z","date_modified":"2024-03-03T00:00:00Z"},{"id":"two","date_published":"2024-02-20T00:00:00Z","date_modified":"2024-03-02T00:00:00Z"}]`,
-				`[{"id":"three","date_published":"2024-01-15T00:00:00Z","date_modified":"2024-02-28T00:00:00Z"}]`,
-				`[{"id":"four","date_published":"2024-01-10T00:00:00Z","date_modified":"2024-02-27T00:00:00Z"}]`,
+				`[{"id":"three","date_published":"2024-01-15T00:00:00Z","date_modified":"2024-02-28T00:00:00Z"},{"id":"four","date_published":"2024-01-14T00:00:00Z","date_modified":"2024-02-27T00:00:00Z"},{"id":"five","date_published":"2024-01-13T00:00:00Z","date_modified":"2024-02-26T00:00:00Z"}]`,
+				`[{"id":"six","date_published":"2024-01-10T00:00:00Z","date_modified":"2024-02-25T00:00:00Z"}]`,
 			},
 			preferUpdated: true,
 			wantRequests:  2,
-			wantItems:     3,
+			wantItems:     5,
 		},
 		{
 			name: "published order cannot terminate updated filtering",
@@ -249,8 +249,8 @@ func TestFetchFeedPagesStopsWhenSinceOrderIsExhausted(t *testing.T) {
 		{
 			name: "duplicate IDs still provide ordering evidence",
 			pages: []string{
-				`[{"id":"one","date_published":"2024-03-03T00:00:00Z"},{"id":"duplicate","date_published":"2024-03-02T00:00:00Z"}]`,
-				`[{"id":"duplicate","date_published":"2024-02-28T00:00:00Z"}]`,
+				`[{"id":"one","date_published":"2024-03-05T00:00:00Z"},{"id":"duplicate","date_published":"2024-03-04T00:00:00Z"}]`,
+				`[{"id":"duplicate","date_published":"2024-03-03T00:00:00Z"},{"id":"duplicate","date_published":"2024-03-02T00:00:00Z"},{"id":"duplicate","date_published":"2024-02-28T00:00:00Z"}]`,
 				`[{"id":"three","date_published":"2024-02-27T00:00:00Z"}]`,
 			},
 			wantRequests: 2,
@@ -259,12 +259,22 @@ func TestFetchFeedPagesStopsWhenSinceOrderIsExhausted(t *testing.T) {
 		{
 			name: "since equality continues pagination",
 			pages: []string{
-				`[{"id":"one","date_published":"2024-03-03T00:00:00Z"},{"id":"two","date_published":"2024-03-02T00:00:00Z"}]`,
-				`[{"id":"three","date_published":"2024-03-01T00:00:00Z"}]`,
-				`[{"id":"four","date_published":"2024-02-28T00:00:00Z"}]`,
+				`[{"id":"one","date_published":"2024-03-05T00:00:00Z"},{"id":"two","date_published":"2024-03-04T00:00:00Z"},{"id":"three","date_published":"2024-03-03T00:00:00Z"}]`,
+				`[{"id":"four","date_published":"2024-03-02T00:00:00Z"},{"id":"five","date_published":"2024-03-01T00:00:00Z"}]`,
+				`[{"id":"six","date_published":"2024-02-28T00:00:00Z"}]`,
 			},
 			wantRequests: 3,
-			wantItems:    4,
+			wantItems:    6,
+		},
+		{
+			name: "later item on threshold page rejects ordering",
+			pages: []string{
+				`[{"id":"one","date_published":"2024-03-05T00:00:00Z"},{"id":"two","date_published":"2024-03-04T00:00:00Z"}]`,
+				`[{"id":"three","date_published":"2024-03-03T00:00:00Z"},{"id":"four","date_published":"2024-03-02T00:00:00Z"},{"id":"five","date_published":"2024-02-28T00:00:00Z"},{"id":"six","date_published":"2024-03-06T00:00:00Z"}]`,
+				`[{"id":"seven","date_published":"2024-02-27T00:00:00Z"}]`,
+			},
+			wantRequests: 3,
+			wantItems:    7,
 		},
 		{
 			name: "rejected candidates continue to max pages",

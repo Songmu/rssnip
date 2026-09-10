@@ -160,12 +160,12 @@ to choose another positive limit. Repeated page URLs stop pagination, and
 duplicate item IDs across pages are emitted once.
 
 When `--since` is present, rssnip can also stop before `--max-pages` after
-observing at least three comparable item dates in newest-first order. The order
+observing at least five comparable item dates in newest-first order. The order
 is checked continuously across page boundaries. Normal date filtering can use
 either publication order, or modification order while every observed
 publication date is no later than its modification date. With `--updated`, only
 modification order can stop pagination. Items without a parseable publication
-or modification date do not contribute to the three-item threshold.
+or modification date do not contribute to the five-item threshold.
 
 ### Output schema
 
@@ -268,7 +268,9 @@ even when no date filter is active.
 For ordered paginated feeds, `--since` uses the observed date order to avoid
 fetching pages that cannot contain another matching item, as described under
 [Pagination](#pagination). The page that crosses the boundary is processed
-normally, and an item dated exactly at `--since` remains included.
+and checked in full before pagination stops, so a later ordering violation on
+that page disables the optimization. An item dated exactly at `--since` remains
+included.
 
 ### jq filtering
 

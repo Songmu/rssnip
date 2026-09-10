@@ -82,24 +82,26 @@ func TestFractionalSecondDates(t *testing.T) {
 	}
 }
 
-func TestDateOrderCandidateRequiresThreeComparableItems(t *testing.T) {
+func TestDateOrderCandidateRequiresFiveComparableItems(t *testing.T) {
 	t.Parallel()
 	since := mustParseTimeBound(t, "2024-01-10", false)
 	var candidate dateOrderCandidate
 	for _, value := range []string{
 		"2024-01-12T00:00:00Z",
+		"2024-01-11T00:00:00Z",
+		"2024-01-10T00:00:00Z",
 		"2024-01-09T00:00:00Z",
 	} {
 		itemTime, ok := parseItemDate(value)
 		candidate.observe(itemTime, ok)
 	}
 	if candidate.exhausted(*since) {
-		t.Error("two comparable items must not enable early termination")
+		t.Error("four comparable items must not enable early termination")
 	}
-	itemTime, ok := parseItemDate("2024-01-09T00:00:00Z")
+	itemTime, ok := parseItemDate("2024-01-08T00:00:00Z")
 	candidate.observe(itemTime, ok)
 	if !candidate.exhausted(*since) {
-		t.Error("three non-increasing comparable items before since should enable early termination")
+		t.Error("five non-increasing comparable items before since should enable early termination")
 	}
 }
 
@@ -108,9 +110,11 @@ func TestDateOrderCandidateRejectsLaterIncrease(t *testing.T) {
 	since := mustParseTimeBound(t, "2024-01-10", false)
 	var candidate dateOrderCandidate
 	for _, value := range []string{
+		"2024-01-14T00:00:00Z",
+		"2024-01-13T00:00:00Z",
 		"2024-01-12T00:00:00Z",
+		"2024-01-11T00:00:00Z",
 		"2024-01-09T00:00:00Z",
-		"2024-01-08T00:00:00Z",
 		"2024-01-11T00:00:00Z",
 		"2024-01-07T00:00:00Z",
 	} {
@@ -159,13 +163,15 @@ func TestPaginationDateOrderIgnoresMissingDates(t *testing.T) {
 	order := newPaginationDateOrder()
 	order.observe(Item{DatePublished: "2024-01-12T00:00:00Z"})
 	order.observe(Item{})
+	order.observe(Item{DatePublished: "2024-01-11T00:00:00Z"})
+	order.observe(Item{DatePublished: "2024-01-10T00:00:00Z"})
 	order.observe(Item{DatePublished: "2024-01-09T00:00:00Z"})
 	if order.exhausted(*since, false) {
-		t.Error("an item without a date must not count toward the three-item threshold")
+		t.Error("an item without a date must not count toward the five-item threshold")
 	}
 	order.observe(Item{DatePublished: "2024-01-08T00:00:00Z"})
 	if !order.exhausted(*since, false) {
-		t.Error("three comparable items across missing dates should enable termination")
+		t.Error("five comparable items across missing dates should enable termination")
 	}
 }
 
@@ -185,6 +191,14 @@ func TestPaginationDateOrderUsesModeSpecificCandidate(t *testing.T) {
 		{
 			DatePublished: "2024-01-15T00:00:00Z",
 			DateModified:  "2024-02-28T00:00:00Z",
+		},
+		{
+			DatePublished: "2024-01-14T00:00:00Z",
+			DateModified:  "2024-02-27T00:00:00Z",
+		},
+		{
+			DatePublished: "2024-01-13T00:00:00Z",
+			DateModified:  "2024-02-26T00:00:00Z",
 		},
 	} {
 		order.observe(item)
@@ -222,6 +236,10 @@ func TestPaginationDateOrderRejectsInvalidModifiedBound(t *testing.T) {
 			DatePublished: "2024-02-15T00:00:00Z",
 			DateModified:  "2024-02-14T00:00:00Z",
 		},
+		{
+			DatePublished: "2024-02-13T00:00:00Z",
+			DateModified:  "2024-02-12T00:00:00Z",
+		},
 	} {
 		order.observe(item)
 	}
@@ -241,6 +259,8 @@ func TestPaginationDateOrderKeepsSinceInclusive(t *testing.T) {
 	since := mustParseTimeBound(t, "2024-01-10", false)
 	order := newPaginationDateOrder()
 	for _, value := range []string{
+		"2024-01-14T00:00:00Z",
+		"2024-01-13T00:00:00Z",
 		"2024-01-12T00:00:00Z",
 		"2024-01-11T00:00:00Z",
 		"2024-01-10T00:00:00Z",
