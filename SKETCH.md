@@ -10,7 +10,7 @@
     - 以下の出力形式は仮
 
 ```sh
-$ rssnip --since 2024-01-01 --until 2024-01-31 https://example.com/rss.xml
+$ rssnip --since 2024-01-01 --until 2024-02-01 https://example.com/rss.xml
 {"title": "Example Title 1", "link": "https://example.com/article1", "pubDate": "2024-01-05"}
 {"title": "Example Title 2", "link": "https://example.com/article2", "pubDate": "2024-01-15"}
 
@@ -19,7 +19,7 @@ $ rssnip --since 2024-01-01 --until 2024-01-31 https://example.com/rss.xml
 ## --jq オプション
 
 ```sh
-$ rssnip --since 2024-01-01 --until 2024-01-31 -r --jq '.link' https://example.com/rss.xml
+$ rssnip --since 2024-01-01 --until 2024-02-01 -r --jq '.link' https://example.com/rss.xml
 https://example.com/article1
 https://example.com/article2
 ```
@@ -37,7 +37,7 @@ https://example.com/article2
 統一的なデータ構造で出力するようにしたい。JSON Feedに正規化する？
 
 ## 設計案
-- sinceやuntilなどの期間指定は、RFC3339形式で指定する
+- sinceやuntilなどの期間指定は、RFC3339またはローカル時刻のYYYY-MM-DDで指定する
     - gitのような指定もできると嬉しいが
     - 期間指定のデフォルトは、過去1週間くらいにする?
     - ページングも可能ならたどりたい

@@ -759,19 +759,16 @@ func normalizeDate(value string) string {
 	return parsed.Format(time.RFC3339Nano)
 }
 
-func parseTimeBound(value string, endOfDay bool) (*time.Time, error) {
+func parseTimeBound(value string, location *time.Location) (*time.Time, error) {
 	if value == "" {
 		return nil, nil
 	}
 	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
 		return &parsed, nil
 	}
-	parsed, err := time.Parse(time.DateOnly, value)
+	parsed, err := time.ParseInLocation(time.DateOnly, value, location)
 	if err != nil {
 		return nil, fmt.Errorf("must be RFC3339 or YYYY-MM-DD")
-	}
-	if endOfDay {
-		parsed = parsed.Add(24*time.Hour - time.Nanosecond)
 	}
 	return &parsed, nil
 }
@@ -811,7 +808,7 @@ func withinPeriod(item Item, since, until *time.Time, preferUpdated bool) bool {
 	if since != nil && itemTime.Before(*since) {
 		return false
 	}
-	if until != nil && itemTime.After(*until) {
+	if until != nil && !itemTime.Before(*until) {
 		return false
 	}
 	return true

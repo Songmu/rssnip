@@ -23,6 +23,16 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (ru
 }
 
 func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errStream io.Writer) (runErr error) {
+	return runInLocation(ctx, argv, inStream, outStream, errStream, time.Local)
+}
+
+func runInLocation(
+	ctx context.Context,
+	argv []string,
+	inStream io.Reader,
+	outStream, errStream io.Writer,
+	location *time.Location,
+) (runErr error) {
 	startedAt := time.Now()
 	fs := flag.NewFlagSet(
 		fmt.Sprintf("%s (v%s rev:%s)", cmdName, version, revision), flag.ContinueOnError)
@@ -37,8 +47,8 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 	}
 
 	ver := fs.Bool("version", false, "display version")
-	sinceValue := fs.String("since", "", "include items on or after RFC3339 time or YYYY-MM-DD (default: 7 days ago)")
-	untilValue := fs.String("until", "", "include items on or before RFC3339 time or YYYY-MM-DD")
+	sinceValue := fs.String("since", "", "include items on or after RFC3339 time or local YYYY-MM-DD (default: 7 days ago)")
+	untilValue := fs.String("until", "", "include items before RFC3339 time or local YYYY-MM-DD")
 	allItems := fs.Bool("all", false, "disable the default --since filter")
 	preferUpdated := fs.Bool("updated", false, "prefer the updated date over the published date when filtering by date")
 	jqExpression := fs.String("jq", "", "apply a jq expression to each item")
@@ -75,11 +85,11 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 	if *allItems && (*sinceValue != "" || *untilValue != "") {
 		return fmt.Errorf("--all cannot be combined with --since or --until")
 	}
-	since, err := parseTimeBound(sinceInput, false)
+	since, err := parseTimeBound(sinceInput, location)
 	if err != nil {
 		return fmt.Errorf("invalid --since: %w", err)
 	}
-	until, err := parseTimeBound(*untilValue, true)
+	until, err := parseTimeBound(*untilValue, location)
 	if err != nil {
 		return fmt.Errorf("invalid --until: %w", err)
 	}

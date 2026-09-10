@@ -287,7 +287,7 @@ func TestJSONFeedOmitsInvalidDates(t *testing.T) {
 	if items[1].DatePublished != "" || items[1].DateModified != "2024-01-15T12:00:00.123Z" {
 		t.Errorf("dates = %#v", items[1])
 	}
-	since := mustParseTimeBound(t, "2024-01-01", false)
+	since := mustParseTimeBound(t, "2024-01-01")
 	if withinPeriod(items[0], since, nil, false) || !withinPeriod(items[1], since, nil, false) {
 		t.Error("date filtering must use remaining valid dates")
 	}
