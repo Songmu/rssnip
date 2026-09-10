@@ -42,7 +42,7 @@ func TestRunDiscoverySkipsNonFeedAlternates(t *testing.T) {
 	}))
 	defer server.Close()
 	var stdout, stderr bytes.Buffer
-	err := run(context.Background(), []string{"--jq", ".id", server.URL},
+	err := run(context.Background(), []string{"--all", "--jq", ".id", server.URL},
 		strings.NewReader(""), &stdout, &stderr)
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +187,7 @@ func TestRunDiscoveryUsesRedirectedPageAndFeedPagination(t *testing.T) {
 	}))
 	defer server.Close()
 	var stdout, stderr bytes.Buffer
-	err := run(context.Background(), []string{"--jq", ".id", "-r", server.URL + "/start"},
+	err := run(context.Background(), []string{"--all", "--jq", ".id", "-r", server.URL + "/start"},
 		strings.NewReader(""), &stdout, &stderr)
 	if err != nil {
 		t.Fatal(err)
@@ -290,7 +290,7 @@ func TestRunDiscoveryAcceptsUppercaseSchemes(t *testing.T) {
 		strings.Replace(server.URL, "http:", "HTTP:", 1) + "/feed.xml",
 	} {
 		var stdout, stderr bytes.Buffer
-		if err := run(context.Background(), []string{input}, strings.NewReader(""), &stdout, &stderr); err != nil {
+		if err := run(context.Background(), []string{"--all", input}, strings.NewReader(""), &stdout, &stderr); err != nil {
 			t.Fatalf("run %q: %v", input, err)
 		}
 		if stdout.Len() == 0 {

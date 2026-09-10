@@ -12,7 +12,10 @@ import (
 	"time"
 )
 
-const cmdName = "rssnip"
+const (
+	cmdName          = "rssnip"
+	defaultSinceDays = 7
+)
 
 // Run runs rssnip with the supplied command-line arguments.
 func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (runErr error) {
@@ -20,6 +23,7 @@ func Run(ctx context.Context, argv []string, outStream, errStream io.Writer) (ru
 }
 
 func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errStream io.Writer) (runErr error) {
+	startedAt := time.Now()
 	fs := flag.NewFlagSet(
 		fmt.Sprintf("%s (v%s rev:%s)", cmdName, version, revision), flag.ContinueOnError)
 	fs.SetOutput(errStream)
@@ -33,8 +37,9 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 	}
 
 	ver := fs.Bool("version", false, "display version")
-	sinceValue := fs.String("since", "", "include items on or after RFC3339 time or YYYY-MM-DD")
+	sinceValue := fs.String("since", "", "include items on or after RFC3339 time or YYYY-MM-DD (default: 7 days ago)")
 	untilValue := fs.String("until", "", "include items on or before RFC3339 time or YYYY-MM-DD")
+	allItems := fs.Bool("all", false, "disable the default --since filter")
 	preferUpdated := fs.Bool("updated", false, "prefer the updated date over the published date when filtering by date")
 	jqExpression := fs.String("jq", "", "apply a jq expression to each item")
 	rawOutput := fs.Bool("r", false, "write string jq results without JSON quoting")
@@ -63,7 +68,14 @@ func run(ctx context.Context, argv []string, inStream io.Reader, outStream, errS
 		return fmt.Errorf("--max-pages must be at least 1")
 	}
 
-	since, err := parseTimeBound(*sinceValue, false)
+	sinceInput := *sinceValue
+	if sinceInput == "" && *untilValue == "" && !*allItems {
+		sinceInput = startedAt.Add(-defaultSinceDays * 24 * time.Hour).UTC().Format(time.RFC3339Nano)
+	}
+	if *allItems && (*sinceValue != "" || *untilValue != "") {
+		return fmt.Errorf("--all cannot be combined with --since or --until")
+	}
+	since, err := parseTimeBound(sinceInput, false)
 	if err != nil {
 		return fmt.Errorf("invalid --since: %w", err)
 	}
