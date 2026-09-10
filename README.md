@@ -167,6 +167,10 @@ publication date is no later than its modification date. With `--updated`, only
 modification order can stop pagination. Items without a parseable publication
 or modification date do not contribute to the five-item threshold.
 
+This is intentionally a best-effort optimization based on the fetched prefix:
+feed pagination does not guarantee that an unseen later page preserves the
+observed order, so a matching item on such an out-of-order page may be omitted.
+
 ### Output schema
 
 Without `--jq`, each JSON Lines record conforms to this JSON Schema:

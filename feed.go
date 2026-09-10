@@ -249,6 +249,8 @@ func fetchFeedPagesSince(
 				nextURL = ""
 			}
 		}
+		// This intentionally trusts the fetched prefix. An unseen later page may
+		// violate the observed order; early termination accepts that tradeoff.
 		if since != nil && order.exhausted(*since, preferUpdated) {
 			break
 		}
