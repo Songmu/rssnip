@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Atom Feed</title>
+  <link href="https://example.com/"/>
+  <entry>
+    <id>published-in-range</id>
+    <title>Published in range</title>
+    <link href="https://example.com/published-in-range"/>
+    <published>2024-01-15T12:00:00Z</published>
+    <updated>2023-12-15T12:00:00Z</updated>
+    <summary>Published inside the period, updated before it.</summary>
+  </entry>
+  <entry>
+    <id>updated-in-range</id>
+    <title>Updated in range</title>
+    <link href="https://example.com/updated-in-range"/>
+    <published>2023-12-01T12:00:00Z</published>
+    <updated>2024-01-20T12:00:00Z</updated>
+    <summary>Published before the period, updated inside it.</summary>
+  </entry>
+  <entry>
+    <id>updated-only</id>
+    <title>Updated only</title>
+    <link href="https://example.com/updated-only"/>
+    <updated>2024-01-25T12:00:00Z</updated>
+    <summary>No publication date, so the updated date is used either way.</summary>
+  </entry>
+</feed>

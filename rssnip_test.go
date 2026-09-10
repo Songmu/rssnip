@@ -428,6 +428,43 @@ func TestRunStdinErrors(t *testing.T) {
 	}
 }
 
+func TestRunPrefersPublishedDateUnlessUpdatedRequested(t *testing.T) {
+	t.Parallel()
+	server := newFeedServer(t, string(mustReadTestdata(t, "atom_published_updated.xml")))
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "published by default",
+			args: []string{"--since", "2024-01-01", "--until", "2024-01-31", "--jq", ".id", "-r", server.URL},
+			want: "published-in-range\nupdated-only\n",
+		},
+		{
+			name: "updated when requested",
+			args: []string{"--since", "2024-01-01", "--until", "2024-01-31", "--updated", "--jq", ".id", "-r", server.URL},
+			want: "updated-in-range\nupdated-only\n",
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var stdout, stderr bytes.Buffer
+			if err := Run(context.Background(), tt.args, &stdout, &stderr); err != nil {
+				t.Fatal(err)
+			}
+			if got := stdout.String(); got != tt.want {
+				t.Errorf("stdout = %q, want %q", got, tt.want)
+			}
+			if stderr.Len() != 0 {
+				t.Errorf("stderr = %q", stderr.String())
+			}
+		})
+	}
+}
+
 func TestRunErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -440,6 +477,7 @@ func TestRunErrors(t *testing.T) {
 		{"removed JSON option", []string{"--json", "https://example.com/feed"}, "flag provided but not defined: -json"},
 		{"invalid since", []string{"--since", "yesterday", "https://example.com/feed"}, "invalid --since"},
 		{"reversed period", []string{"--since", "2024-02-01", "--until", "2024-01-01", "https://example.com/feed"}, "--since must not be after --until"},
+		{"updated without period", []string{"--updated", "https://example.com/feed"}, "--updated requires --since or --until"},
 		{"invalid URL", []string{"--jq", ".", "://bad"}, "invalid feed URL"},
 		{"relative URL", []string{"feed.xml"}, "invalid feed URL"},
 		{"non-HTTP URL", []string{"ftp://example.com/feed"}, "invalid feed URL"},
