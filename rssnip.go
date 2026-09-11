@@ -177,14 +177,7 @@ func fetchFeeds(
 	}()
 
 	pending := make(map[int]result, maxConcurrentFetches)
-	hasPendingError := func() bool {
-		for _, pendingResult := range pending {
-			if pendingResult.err != nil {
-				return true
-			}
-		}
-		return false
-	}
+	sawError := false
 	nextJob := 0
 	dispatch := func() error {
 		select {
@@ -207,7 +200,7 @@ func fetchFeeds(
 				if err := consume(result.items, result.err); err != nil {
 					return err
 				}
-				if nextJob < len(urls) && !hasPendingError() {
+				if nextJob < len(urls) && !sawError {
 					if err := dispatch(); err != nil {
 						return err
 					}
@@ -223,6 +216,7 @@ func fetchFeeds(
 					return fmt.Errorf("fetch feed %q: incomplete result stream", urls[next])
 				}
 				pending[result.index] = result
+				sawError = sawError || result.err != nil
 			case <-fetchContext.Done():
 				return fetchContext.Err()
 			}
