@@ -114,12 +114,12 @@ func runInLocation(
 		Timeout:   30 * time.Second,
 		Transport: newPoliteTransport(nil),
 	}
-	feedItemsByURL, err := fetchFeeds(
+	feedItemsByURL, feedErrors := fetchFeeds(
 		ctx, client, urls, *maxPages, since, *preferUpdated)
-	if err != nil {
-		return err
-	}
-	for _, feedItems := range feedItemsByURL {
+	for index, feedItems := range feedItemsByURL {
+		if err := feedErrors[index]; err != nil {
+			return err
+		}
 		filtered := feedItems
 		if since != nil || until != nil {
 			filtered = feedItems[:0]
@@ -143,7 +143,7 @@ func fetchFeeds(
 	maxPages int,
 	since *time.Time,
 	preferUpdated bool,
-) ([][]Item, error) {
+) ([][]Item, []error) {
 	items := make([][]Item, len(urls))
 	errors := make([]error, len(urls))
 	jobs := make(chan int)
@@ -161,12 +161,7 @@ func fetchFeeds(
 	}
 	close(jobs)
 	workers.Wait()
-	for _, err := range errors {
-		if err != nil {
-			return nil, err
-		}
-	}
-	return items, nil
+	return items, errors
 }
 
 func readStdinURLs(in io.Reader) ([]string, error) {

@@ -100,8 +100,14 @@ func TestFetchFeedsLimitsConcurrentHosts(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := fetchFeeds(context.Background(), &http.Client{Transport: transport}, urls, 1, nil, false)
-		done <- err
+		_, errors := fetchFeeds(context.Background(), &http.Client{Transport: transport}, urls, 1, nil, false)
+		for _, err := range errors {
+			if err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
 	}()
 	for range maxConcurrentFetches {
 		<-started
