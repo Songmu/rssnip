@@ -300,6 +300,30 @@ The initial release focuses on direct feed retrieval and HTML feed discovery.
 Conditional requests, persistent caching, and natural-language date expressions
 are intentionally outside its scope.
 
+## Library usage
+
+The `github.com/Songmu/rssnip` package exposes the same retrieval and
+normalization pipeline that backs the command. `Fetch` takes one feed or blog
+URL plus options, follows HTML feed discovery and feed pagination, and returns
+`[]Item` in JSON Feed 1.1 shape. `Parse` reads a document the caller already
+holds and performs no network access.
+
+```go
+items, err := rssnip.Fetch(ctx, "https://example.com/blog",
+    rssnip.WithSince(time.Now().AddDate(0, 0, -7)),
+    rssnip.WithMaxPages(3),
+)
+```
+
+Options are `WithHTTPClient`, `WithUserAgent`, `WithMaxPages`, `WithSince`,
+`WithUntil`, `WithPreferUpdated`, and `WithDiscovery`; invalid values are
+reported by `Fetch` and `Parse`. Non-2xx responses return a `*StatusError`,
+unparseable documents match `ErrNotFeed`, and pages advertising no feed match
+`ErrNoFeedFound`. The [`feediscovery`](https://pkg.go.dev/github.com/Songmu/rssnip/feediscovery)
+subpackage lists the feed links an HTML page advertises without fetching them.
+See the [package documentation](https://pkg.go.dev/github.com/Songmu/rssnip)
+for the full contract.
+
 ## Agent Skill
 
 The rssnip binary includes an English [Agent Skill](https://agentskills.io/)
