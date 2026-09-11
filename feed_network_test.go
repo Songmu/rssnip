@@ -70,6 +70,68 @@ func TestPoliteTransportSpacesRequestsToSameHost(t *testing.T) {
 	}
 }
 
+func TestPoliteTransportSerializesConcurrentCanonicalHosts(t *testing.T) {
+	secondStarted := make(chan time.Time, 1)
+	secondDeadline := make(chan time.Time, 1)
+	transport := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path == "/two" {
+			secondStarted <- time.Now()
+			deadline, ok := request.Context().Deadline()
+			if !ok {
+				t.Error("second request has no timeout")
+			} else {
+				secondDeadline <- deadline
+			}
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader("")),
+			Header:     make(http.Header),
+		}, nil
+	})
+	client := &http.Client{Transport: newPoliteTransport(transport)}
+	first, err := client.Get("https://EXAMPLE.com/one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type responseResult struct {
+		response *http.Response
+		err      error
+	}
+	done := make(chan responseResult, 1)
+	go func() {
+		response, err := client.Get("https://example.com./two")
+		done <- responseResult{response: response, err: err}
+	}()
+	select {
+	case <-secondStarted:
+		t.Fatal("second request started before the first response closed")
+	case <-time.After(50 * time.Millisecond):
+	}
+	closedAt := time.Now()
+	if err := first.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case startedAt := <-secondStarted:
+		if got := startedAt.Sub(closedAt); got < hostFetchInterval {
+			t.Errorf("second request started after %s, want at least %s", got, hostFetchInterval)
+		}
+	case <-time.After(2 * hostFetchInterval):
+		t.Fatal("second request did not start")
+	}
+	if untilDeadline := time.Until(<-secondDeadline); untilDeadline < feedRequestTimeout-100*time.Millisecond {
+		t.Errorf("second request timeout = %s, want approximately %s", untilDeadline, feedRequestTimeout)
+	}
+	result := <-done
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	if err := result.response.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPoliteTransportPacesPagination(t *testing.T) {
 	var mu sync.Mutex
 	var starts []time.Time
@@ -128,14 +190,8 @@ func TestFetchFeedsLimitsConcurrentHosts(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, errors := fetchFeeds(context.Background(), &http.Client{Transport: transport}, urls, 1, nil, false)
-		for _, err := range errors {
-			if err != nil {
-				done <- err
-				return
-			}
-		}
-		done <- nil
+		done <- fetchFeeds(context.Background(), &http.Client{Transport: transport}, urls, 1, nil, false,
+			func(_ []Item, err error) error { return err })
 	}()
 	for range maxConcurrentFetches {
 		<-started
@@ -148,6 +204,83 @@ func TestFetchFeedsLimitsConcurrentHosts(t *testing.T) {
 	defer mu.Unlock()
 	if maximum != maxConcurrentFetches {
 		t.Errorf("maximum concurrent requests = %d, want %d", maximum, maxConcurrentFetches)
+	}
+}
+
+func TestFetchFeedsBackpressuresCompletedFeeds(t *testing.T) {
+	const feed = `{"version":"https://jsonfeed.org/version/1.1","items":[]}`
+	started := make(chan struct{}, maxConcurrentFetches+1)
+	releaseFirst := make(chan struct{})
+	transport := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		started <- struct{}{}
+		if request.URL.Path == "/0" {
+			<-releaseFirst
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(feed)),
+			Header:     make(http.Header),
+		}, nil
+	})
+	urls := make([]string, maxConcurrentFetches+1)
+	for index := range urls {
+		urls[index] = fmt.Sprintf("https://host-%d.example/%d", index, index)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- fetchFeeds(context.Background(), &http.Client{Transport: transport}, urls, 1, nil, false,
+			func(_ []Item, err error) error { return err })
+	}()
+	for range maxConcurrentFetches {
+		<-started
+	}
+	select {
+	case <-started:
+		t.Fatal("started a request beyond the completed-feed window")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseFirst)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunWritesFeedsInInputOrder(t *testing.T) {
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(firstStarted)
+		<-releaseFirst
+		fmt.Fprint(w, `{"version":"https://jsonfeed.org/version/1.1","items":[{"id":"first","title":"First"}]}`)
+	}))
+	t.Cleanup(first.Close)
+	secondFinished := make(chan struct{})
+	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"version":"https://jsonfeed.org/version/1.1","items":[{"id":"second","title":"Second"}]}`)
+		close(secondFinished)
+	}))
+	t.Cleanup(second.Close)
+
+	secondURL := strings.Replace(second.URL, "127.0.0.1", "localhost", 1)
+	var stdout, stderr strings.Builder
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(context.Background(), []string{"--all", first.URL, secondURL}, &stdout, &stderr)
+	}()
+	<-firstStarted
+	select {
+	case <-secondFinished:
+	case <-time.After(time.Second):
+		t.Fatal("second feed did not complete before the first")
+	}
+	close(releaseFirst)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	firstIndex := strings.Index(stdout.String(), `"title":"First"`)
+	secondIndex := strings.Index(stdout.String(), `"title":"Second"`)
+	if firstIndex < 0 || secondIndex < 0 || firstIndex > secondIndex {
+		t.Errorf("output is not in input order: %s", stdout.String())
 	}
 }
 

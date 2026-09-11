@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/netip"
+	"strings"
 	"sync"
 	"time"
 )
@@ -11,6 +13,7 @@ import (
 const (
 	maxConcurrentFetches = 8
 	hostFetchInterval    = time.Second
+	feedRequestTimeout   = 30 * time.Second
 )
 
 type politeTransport struct {
@@ -31,7 +34,7 @@ func newPoliteTransport(base http.RoundTripper) *politeTransport {
 }
 
 func (transport *politeTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	host := request.URL.Hostname()
+	host := canonicalHost(request.URL.Hostname())
 	stateValue, _ := transport.hosts.LoadOrStore(host, &hostFetchState{
 		token: make(chan struct{}, 1),
 	})
@@ -40,19 +43,35 @@ func (transport *politeTransport) RoundTrip(request *http.Request) (*http.Respon
 		return nil, err
 	}
 
+	requestContext, cancel := context.WithTimeout(request.Context(), feedRequestTimeout)
+	request = request.Clone(requestContext)
 	response, err := transport.base.RoundTrip(request)
 	if err != nil {
+		cancel()
 		releaseHostFetch(state)
 		return nil, err
 	}
 	if response.Body == nil {
+		cancel()
 		releaseHostFetch(state)
 		return response, nil
 	}
 	response.Body = &hostFetchBody{ReadCloser: response.Body, release: func() {
+		cancel()
 		releaseHostFetch(state)
 	}}
 	return response, nil
+}
+
+func canonicalHost(host string) string {
+	address, zone, hasZone := strings.Cut(host, "%")
+	if parsed, err := netip.ParseAddr(address); err == nil {
+		if hasZone {
+			return parsed.String() + "%" + zone
+		}
+		return parsed.String()
+	}
+	return strings.TrimSuffix(strings.ToLower(host), ".")
 }
 
 func acquireHostFetch(ctx context.Context, state *hostFetchState) error {
