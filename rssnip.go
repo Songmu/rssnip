@@ -178,8 +178,8 @@ func fetchFeeds(
 
 	pending := make(map[int]result, maxConcurrentFetches)
 	hasPendingError := func() bool {
-		for _, result := range pending {
-			if result.err != nil {
+		for _, pendingResult := range pending {
+			if pendingResult.err != nil {
 				return true
 			}
 		}
