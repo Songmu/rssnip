@@ -539,17 +539,18 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 			}
 		}
 
-		func resolveAuthors(base string, authors []Author) []Author {
-			resolved := append([]Author(nil), authors...)
-			for i := range resolved {
-				resolved[i].URL = resolveURL(base, resolved[i].URL)
-				resolved[i].Avatar = resolveURL(base, resolved[i].Avatar)
-			}
-			return resolved
-		}
 		items = append(items, item)
 	}
 	return items, true, nil
+}
+
+func resolveAuthors(base string, authors []Author) []Author {
+	resolved := append([]Author(nil), authors...)
+	for i := range resolved {
+		resolved[i].URL = resolveURL(base, resolved[i].URL)
+		resolved[i].Avatar = resolveURL(base, resolved[i].Avatar)
+	}
+	return resolved
 }
 
 func nextPageURL(body []byte, sourceURL string) (string, error) {

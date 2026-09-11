@@ -285,6 +285,46 @@ func TestParseReadsFeedWithoutNetworkAccess(t *testing.T) {
 	}
 }
 
+func TestParseResolvesJSONFeedURLs(t *testing.T) {
+	t.Parallel()
+	document := `{
+	  "version": "https://jsonfeed.org/version/1.1",
+	  "home_page_url": "/",
+	  "authors": [{"url": "/authors/feed", "avatar": "/avatars/feed.png"}],
+	  "items": [{
+	    "id": "1",
+	    "url": "/posts/1",
+	    "external_url": "/external/1",
+	    "image": "/images/1.png",
+	    "banner_image": "/banners/1.png",
+	    "attachments": [{"url": "/media/1.mp3", "mime_type": "audio/mpeg"}]
+	  }]
+	}`
+	items, err := rssnip.Parse(strings.NewReader(document),
+		"https://example.com/feed.json", "application/feed+json")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %v, want one item", itemIDs(items))
+	}
+	item := items[0]
+	if item.URL != "https://example.com/posts/1" || item.ExternalURL != "https://example.com/external/1" ||
+		item.Image != "https://example.com/images/1.png" || item.BannerImage != "https://example.com/banners/1.png" {
+		t.Errorf("item URLs = %#v, want relative URLs resolved", item)
+	}
+	if item.Feed.HomePageURL != "https://example.com/" {
+		t.Errorf("home page URL = %q, want resolved URL", item.Feed.HomePageURL)
+	}
+	if len(item.Authors) != 1 || item.Authors[0].URL != "https://example.com/authors/feed" ||
+		item.Authors[0].Avatar != "https://example.com/avatars/feed.png" {
+		t.Errorf("authors = %#v, want relative URLs resolved", item.Authors)
+	}
+	if len(item.Attachments) != 1 || item.Attachments[0].URL != "https://example.com/media/1.mp3" {
+		t.Errorf("attachments = %#v, want relative URLs resolved", item.Attachments)
+	}
+}
+
 func TestParseIgnoresPaginationLinks(t *testing.T) {
 	t.Parallel()
 	document := jsonFeedDocument("first", "2026-01-03T00:00:00Z", "https://example.com/feed2.json")
