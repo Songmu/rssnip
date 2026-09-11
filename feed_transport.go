@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/net/idna"
 )
 
 const (
@@ -146,6 +148,9 @@ func canonicalHost(host string) string {
 			return parsed.String() + "%" + zone
 		}
 		return parsed.String()
+	}
+	if ascii, err := idna.Lookup.ToASCII(host); err == nil {
+		return strings.TrimSuffix(strings.ToLower(ascii), ".")
 	}
 	return strings.TrimSuffix(strings.ToLower(host), ".")
 }

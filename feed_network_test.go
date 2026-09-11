@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/net/idna"
 )
 
 type errorTransport struct{ err error }
@@ -116,12 +118,12 @@ func TestPoliteTransportSerializesConcurrentCanonicalHosts(t *testing.T) {
 		if got := startedAt.Sub(closedAt); got < hostFetchInterval {
 			t.Errorf("second request started after %s, want at least %s", got, hostFetchInterval)
 		}
+		deadline := <-secondDeadline
+		if timeout := deadline.Sub(closedAt); timeout < hostFetchInterval+feedRequestTimeout-100*time.Millisecond {
+			t.Errorf("second request timeout after close = %s, want approximately %s", timeout, hostFetchInterval+feedRequestTimeout)
+		}
 	case <-time.After(2 * hostFetchInterval):
 		t.Fatal("second request did not start")
-	}
-	deadline := <-secondDeadline
-	if untilDeadline := time.Until(deadline); untilDeadline < feedRequestTimeout-100*time.Millisecond {
-		t.Errorf("second request timeout = %s, want approximately %s", untilDeadline, feedRequestTimeout)
 	}
 	result := <-done
 	if result.err != nil {
@@ -134,16 +136,28 @@ func TestPoliteTransportSerializesConcurrentCanonicalHosts(t *testing.T) {
 
 func TestCanonicalHost(t *testing.T) {
 	tests := []struct {
-		host string
-		want string
+		host    string
+		want    string
+		invalid bool
 	}{
-		{"EXAMPLE.com.", "example.com"},
-		{"192.0.2.1", "192.0.2.1"},
-		{"2001:DB8::0:1", "2001:db8::1"},
-		{"fe80::1%en0", "fe80::1%en0"},
+		{host: "EXAMPLE.com.", want: "example.com"},
+		{host: "bücher.example", want: "xn--bcher-kva.example"},
+		{host: "xn--bcher-kva.example", want: "xn--bcher-kva.example"},
+		{host: "example.com。", want: "example.com"},
+		{host: "example.com．", want: "example.com"},
+		{host: "example.com｡", want: "example.com"},
+		{host: "foo_bar.example", want: "foo_bar.example", invalid: true},
+		{host: "192.0.2.1", want: "192.0.2.1"},
+		{host: "2001:DB8::0:1", want: "2001:db8::1"},
+		{host: "fe80::1%en0", want: "fe80::1%en0"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.host, func(t *testing.T) {
+			if tt.invalid {
+				if _, err := idna.Lookup.ToASCII(tt.host); err == nil {
+					t.Fatalf("idna.Lookup.ToASCII(%q) succeeded, want error", tt.host)
+				}
+			}
 			if got := canonicalHost(tt.host); got != tt.want {
 				t.Errorf("canonicalHost(%q) = %q, want %q", tt.host, got, tt.want)
 			}
@@ -210,7 +224,7 @@ func TestFetchFeedsLimitsConcurrentHosts(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- fetchFeeds(context.Background(), &http.Client{Transport: transport}, urls, 1, nil, false,
-			func(_ []Item, err error) error { return err })
+			func(_ []Item) error { return nil })
 	}()
 	for range maxConcurrentFetches {
 		<-started
@@ -248,7 +262,7 @@ func TestFetchFeedsBackpressuresCompletedFeeds(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- fetchFeeds(context.Background(), &http.Client{Transport: transport}, urls, 1, nil, false,
-			func(_ []Item, err error) error { return err })
+			func(_ []Item) error { return nil })
 	}()
 	for range maxConcurrentFetches {
 		<-started

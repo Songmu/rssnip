@@ -112,10 +112,7 @@ func runInLocation(
 
 	client := &http.Client{Transport: newPoliteTransport(nil)}
 	return fetchFeeds(ctx, client, urls, *maxPages, since, *preferUpdated,
-		func(feedItems []Item, err error) error {
-			if err != nil {
-				return err
-			}
+		func(feedItems []Item) error {
 			filtered := feedItems
 			if since != nil || until != nil {
 				filtered = feedItems[:0]
@@ -136,7 +133,7 @@ func fetchFeeds(
 	maxPages int,
 	since *time.Time,
 	preferUpdated bool,
-	consume func([]Item, error) error,
+	consume func([]Item) error,
 ) error {
 	type result struct {
 		index int
@@ -177,6 +174,14 @@ func fetchFeeds(
 	}()
 
 	pending := make(map[int]result, maxConcurrentFetches)
+	hasPendingError := func() bool {
+		for _, pendingResult := range pending {
+			if pendingResult.err != nil {
+				return true
+			}
+		}
+		return false
+	}
 	nextJob := 0
 	dispatch := func() error {
 		select {
@@ -196,10 +201,13 @@ func fetchFeeds(
 		for {
 			if result, ok := pending[next]; ok {
 				delete(pending, next)
-				if err := consume(result.items, result.err); err != nil {
+				if result.err != nil {
+					return result.err
+				}
+				if err := consume(result.items); err != nil {
 					return err
 				}
-				if nextJob < len(urls) {
+				if nextJob < len(urls) && !hasPendingError() {
 					if err := dispatch(); err != nil {
 						return err
 					}
