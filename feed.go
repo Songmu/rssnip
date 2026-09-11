@@ -310,7 +310,7 @@ func fetchFeedPage(ctx context.Context, opts *options, feedURL string, allowDisc
 
 func fetchFeedDocument(ctx context.Context, opts *options, feedURL string) ([]byte, string, string, error) {
 	parsedURL, err := url.ParseRequestURI(feedURL)
-	if err != nil || parsedURL.Host == "" ||
+	if err != nil || parsedURL.Host == "" || parsedURL.Hostname() == "" ||
 		(parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
 		if err == nil {
 			err = fmt.Errorf("must be an absolute HTTP or HTTPS URL")

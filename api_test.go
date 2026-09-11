@@ -233,6 +233,7 @@ func TestFetchRejectsInvalidOptionsAndURLs(t *testing.T) {
 		}, "since must not be after until"},
 		{"relative URL", "/feed.json", nil, "invalid feed URL"},
 		{"unsupported scheme", "file:///feed.json", nil, "invalid feed URL"},
+		{"empty hostname", "http://:80/feed.json", nil, "invalid feed URL"},
 		{"userinfo", userinfoURL(), nil, "userinfo is not allowed"},
 	}
 	for _, tt := range tests {
