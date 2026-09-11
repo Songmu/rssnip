@@ -132,6 +132,25 @@ func TestPoliteTransportSerializesConcurrentCanonicalHosts(t *testing.T) {
 	}
 }
 
+func TestCanonicalHost(t *testing.T) {
+	tests := []struct {
+		host string
+		want string
+	}{
+		{"EXAMPLE.com.", "example.com"},
+		{"192.0.2.1", "192.0.2.1"},
+		{"2001:DB8::0:1", "2001:db8::1"},
+		{"fe80::1%en0", "fe80::1%en0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.host, func(t *testing.T) {
+			if got := canonicalHost(tt.host); got != tt.want {
+				t.Errorf("canonicalHost(%q) = %q, want %q", tt.host, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPoliteTransportPacesPagination(t *testing.T) {
 	var mu sync.Mutex
 	var starts []time.Time

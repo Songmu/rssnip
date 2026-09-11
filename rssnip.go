@@ -172,10 +172,6 @@ func fetchFeeds(
 		workers.Wait()
 	}()
 	go func() {
-		<-fetchContext.Done()
-		closeJobStream()
-	}()
-	go func() {
 		workers.Wait()
 		close(results)
 	}()
@@ -210,14 +206,18 @@ func fetchFeeds(
 				}
 				break
 			}
-			result, ok := <-results
-			if !ok {
-				if err := fetchContext.Err(); err != nil {
-					return err
+			select {
+			case result, ok := <-results:
+				if !ok {
+					if err := fetchContext.Err(); err != nil {
+						return err
+					}
+					return fmt.Errorf("fetch feed %q: incomplete result stream", urls[next])
 				}
-				return fmt.Errorf("fetch feeds: incomplete result stream")
+				pending[result.index] = result
+			case <-fetchContext.Done():
+				return fetchContext.Err()
 			}
-			pending[result.index] = result
 		}
 	}
 	return nil
