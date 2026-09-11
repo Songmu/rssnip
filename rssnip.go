@@ -144,9 +144,7 @@ func fetchFeeds(
 		err   error
 	}
 	fetchContext, cancel := context.WithCancel(ctx)
-	defer cancel()
 	jobs := make(chan int)
-	defer close(jobs)
 	results := make(chan result)
 	var workers sync.WaitGroup
 	for range min(maxConcurrentFetches, len(urls)) {
@@ -162,6 +160,21 @@ func fetchFeeds(
 			}
 		})
 	}
+	var closeJobs sync.Once
+	closeJobStream := func() {
+		closeJobs.Do(func() {
+			close(jobs)
+		})
+	}
+	defer func() {
+		cancel()
+		closeJobStream()
+		workers.Wait()
+	}()
+	go func() {
+		<-fetchContext.Done()
+		closeJobStream()
+	}()
 	go func() {
 		workers.Wait()
 		close(results)

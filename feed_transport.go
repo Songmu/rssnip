@@ -28,7 +28,8 @@ type hostFetchState struct {
 
 type scheduledHostFetch struct {
 	state *hostFetchState
-	once  sync.Once
+	mu    sync.Mutex
+	taken bool
 }
 
 type scheduledHostFetchKey struct{}
@@ -51,6 +52,9 @@ func (transport *politeTransport) Do(client *http.Client, request *http.Request)
 	response, err := client.Do(request)
 	if err != nil {
 		cancel()
+		if scheduled.release() {
+			releaseHostFetch(state)
+		}
 		return nil, err
 	}
 	if response.Body == nil {
@@ -72,9 +76,7 @@ func (transport *politeTransport) RoundTrip(request *http.Request) (*http.Respon
 	var state *hostFetchState
 	var cancel context.CancelFunc
 	if scheduled, ok := request.Context().Value(scheduledHostFetchKey{}).(*scheduledHostFetch); ok {
-		scheduled.once.Do(func() {
-			state = scheduled.state
-		})
+		state = scheduled.take()
 	}
 	if state == nil {
 		state = transport.hostState(request.URL.Hostname())
@@ -108,6 +110,26 @@ func (transport *politeTransport) RoundTrip(request *http.Request) (*http.Respon
 		releaseHostFetch(state)
 	}}
 	return response, nil
+}
+
+func (scheduled *scheduledHostFetch) take() *hostFetchState {
+	scheduled.mu.Lock()
+	defer scheduled.mu.Unlock()
+	if scheduled.taken {
+		return nil
+	}
+	scheduled.taken = true
+	return scheduled.state
+}
+
+func (scheduled *scheduledHostFetch) release() bool {
+	scheduled.mu.Lock()
+	defer scheduled.mu.Unlock()
+	if scheduled.taken {
+		return false
+	}
+	scheduled.taken = true
+	return true
 }
 
 func (transport *politeTransport) hostState(host string) *hostFetchState {
