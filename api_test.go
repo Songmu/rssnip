@@ -252,8 +252,8 @@ func TestFetchRejectsInvalidOptionsAndURLs(t *testing.T) {
 
 func TestFetchRejectsNilContext(t *testing.T) {
 	t.Parallel()
-	//nolint:staticcheck // the nil context is the behavior under test
-	_, err := rssnip.Fetch(nil, "https://example.com/feed.json")
+	var ctx context.Context
+	_, err := rssnip.Fetch(ctx, "https://example.com/feed.json")
 	if err == nil || !strings.Contains(err.Error(), "context must not be nil") {
 		t.Fatalf("error = %v, want a nil context error", err)
 	}
@@ -321,6 +321,7 @@ func TestParseRejectsHTMLDocument(t *testing.T) {
 	  <link rel="alternate" type="application/rss+xml" href="/feed.xml"></head></html>`,
 		"byte order mark and comment": "\ufeff<!-- hello --><!DOCTYPE html><html></html>",
 		"head only":                   `<head><title>Blog</title></head>`,
+		"body first":                  `<main><h1>Blog</h1></main>`,
 	}
 	for name, document := range documents {
 		for _, contentType := range []string{"text/html; charset=utf-8", ""} {
@@ -347,6 +348,8 @@ func TestParseRejectsInvalidInput(t *testing.T) {
 	}{
 		{"nil reader", nil, "https://example.com/feed.json", "document reader is nil"},
 		{"relative source URL", strings.NewReader("{}"), "/feed.json",
+			"must be an absolute HTTP or HTTPS URL"},
+		{"empty hostname", strings.NewReader("{}"), "https://:443/feed.json",
 			"must be an absolute HTTP or HTTPS URL"},
 		{"source URL with userinfo", strings.NewReader("{}"),
 			userinfoURL(), "must not contain userinfo"},

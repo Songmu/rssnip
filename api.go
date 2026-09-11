@@ -110,9 +110,10 @@ func WithUserAgent(userAgent string) Option {
 	}
 }
 
-// WithMaxPages limits how many pages Fetch retrieves from a single feed. It
-// defaults to 10 and must be at least 1; 1 disables pagination. Parse ignores
-// it because Parse never follows pagination links.
+// WithMaxPages limits how many feed pages Fetch retrieves. It defaults to 10
+// and must be at least 1; 1 disables pagination. When discovery is enabled,
+// Fetch may retrieve an additional HTML document before the feed pages. Parse
+// ignores it because Parse never follows pagination links.
 func WithMaxPages(maxPages int) Option {
 	return func(o *options) error {
 		if maxPages < 1 {
@@ -169,7 +170,8 @@ func WithDiscovery(discovery bool) Option {
 // at a feed or, unless WithDiscovery(false) is set, at an HTML page advertising
 // one; the first advertised link is then fetched instead. Fetch follows Atom
 // rel="next" links, JSON Feed next_url, and WordPress paged feeds up to
-// WithMaxPages documents, skipping items whose ID was already seen. Each
+// WithMaxPages feed pages, skipping items whose ID was already seen. When
+// discovery is enabled, Fetch may retrieve an additional HTML document. Each
 // document is limited to MaxFeedSize bytes.
 //
 // A non-2xx response returns a *StatusError, except that a 404 or 410 response
@@ -250,7 +252,7 @@ func filterItems(items []Item, opts *options) []Item {
 
 func validateDocumentURL(documentURL string) error {
 	parsed, err := url.ParseRequestURI(documentURL)
-	if err != nil || parsed.Host == "" ||
+	if err != nil || parsed.Host == "" || parsed.Hostname() == "" ||
 		(parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return fmt.Errorf("rssnip: source URL %q must be an absolute HTTP or HTTPS URL",
 			displayURL(documentURL))

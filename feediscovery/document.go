@@ -188,7 +188,9 @@ func LooksLikeHTML(body []byte, contentType string) bool {
 			switch tokenizer.Token().DataAtom {
 			case htmlatom.Html, htmlatom.Head, htmlatom.Body, htmlatom.Title,
 				htmlatom.Meta, htmlatom.Link, htmlatom.Base, htmlatom.Template,
-				htmlatom.Script, htmlatom.Style, htmlatom.Noscript:
+				htmlatom.Script, htmlatom.Style, htmlatom.Noscript, htmlatom.Main,
+				htmlatom.Div, htmlatom.H1, htmlatom.Article, htmlatom.Section,
+				htmlatom.Header, htmlatom.Footer, htmlatom.Nav, htmlatom.P:
 				return true
 			default:
 				return false
