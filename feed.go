@@ -307,7 +307,7 @@ func fetchFeedDocument(ctx context.Context, client *http.Client, feedURL string)
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "application/feed+json, application/json, application/atom+xml, application/rss+xml, application/rdf+xml, application/xml, text/xml, */*;q=0.1")
 
-	resp, err := client.Do(req)
+	resp, err := doRequest(client, req)
 	if err != nil {
 		var urlErr *url.Error
 		if errors.As(err, &urlErr) {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -109,24 +110,122 @@ func runInLocation(
 		return err
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	for _, feedURL := range urls {
-		feedItems, err := fetchFeedPagesSince(
-			ctx, client, feedURL, *maxPages, since, *preferUpdated)
-		if err != nil {
-			return err
-		}
-		filtered := feedItems
-		if since != nil || until != nil {
-			filtered = feedItems[:0]
-			for _, item := range feedItems {
-				if withinPeriod(item, since, until, *preferUpdated) {
-					filtered = append(filtered, item)
+	client := &http.Client{Transport: newPoliteTransport(nil)}
+	return fetchFeeds(ctx, client, urls, *maxPages, since, *preferUpdated,
+		func(feedItems []Item) error {
+			filtered := feedItems
+			if since != nil || until != nil {
+				filtered = feedItems[:0]
+				for _, item := range feedItems {
+					if withinPeriod(item, since, until, *preferUpdated) {
+						filtered = append(filtered, item)
+					}
 				}
 			}
+			return writeItemsWithCodeContextAndFeed(ctx, outStream, filtered, code, *rawOutput, *withFeed)
+		})
+}
+
+func fetchFeeds(
+	ctx context.Context,
+	client *http.Client,
+	urls []string,
+	maxPages int,
+	since *time.Time,
+	preferUpdated bool,
+	consume func([]Item) error,
+) error {
+	type result struct {
+		index int
+		items []Item
+		err   error
+	}
+	fetchContext, cancel := context.WithCancel(ctx)
+	jobs := make(chan int)
+	results := make(chan result)
+	var workers sync.WaitGroup
+	for range min(maxConcurrentFetches, len(urls)) {
+		workers.Go(func() {
+			for index := range jobs {
+				items, err := fetchFeedPagesSince(
+					fetchContext, client, urls[index], maxPages, since, preferUpdated)
+				select {
+				case results <- result{index: index, items: items, err: err}:
+				case <-fetchContext.Done():
+					return
+				}
+			}
+		})
+	}
+	var closeJobs sync.Once
+	closeJobStream := func() {
+		closeJobs.Do(func() {
+			close(jobs)
+		})
+	}
+	defer func() {
+		cancel()
+		closeJobStream()
+		workers.Wait()
+	}()
+	go func() {
+		workers.Wait()
+		close(results)
+	}()
+
+	pending := make(map[int]result, maxConcurrentFetches)
+	hasPendingError := func() bool {
+		for _, pendingResult := range pending {
+			if pendingResult.err != nil {
+				return true
+			}
 		}
-		if err := writeItemsWithCodeContextAndFeed(ctx, outStream, filtered, code, *rawOutput, *withFeed); err != nil {
+		return false
+	}
+	nextJob := 0
+	dispatch := func() error {
+		select {
+		case jobs <- nextJob:
+			nextJob++
+			return nil
+		case <-fetchContext.Done():
+			return fetchContext.Err()
+		}
+	}
+	for range min(maxConcurrentFetches, len(urls)) {
+		if err := dispatch(); err != nil {
 			return err
+		}
+	}
+	for next := range urls {
+		for {
+			if result, ok := pending[next]; ok {
+				delete(pending, next)
+				if result.err != nil {
+					return result.err
+				}
+				if err := consume(result.items); err != nil {
+					return err
+				}
+				if nextJob < len(urls) && !hasPendingError() {
+					if err := dispatch(); err != nil {
+						return err
+					}
+				}
+				break
+			}
+			select {
+			case result, ok := <-results:
+				if !ok {
+					if err := fetchContext.Err(); err != nil {
+						return err
+					}
+					return fmt.Errorf("fetch feed %q: incomplete result stream", urls[next])
+				}
+				pending[result.index] = result
+			case <-fetchContext.Done():
+				return fetchContext.Err()
+			}
 		}
 	}
 	return nil
