@@ -149,11 +149,10 @@ func canonicalHost(host string) string {
 		}
 		return parsed.String()
 	}
-	host = strings.TrimSuffix(strings.ToLower(host), ".")
 	if ascii, err := idna.Lookup.ToASCII(host); err == nil {
-		return ascii
+		return strings.TrimSuffix(strings.ToLower(ascii), ".")
 	}
-	return host
+	return strings.TrimSuffix(strings.ToLower(host), ".")
 }
 
 func acquireHostFetch(ctx context.Context, state *hostFetchState) error {
