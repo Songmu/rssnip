@@ -26,6 +26,13 @@ type hostFetchState struct {
 	lastFinished time.Time
 }
 
+type scheduledHostFetch struct {
+	state *hostFetchState
+	once  sync.Once
+}
+
+type scheduledHostFetchKey struct{}
+
 func newPoliteTransport(base http.RoundTripper) *politeTransport {
 	if base == nil {
 		base = http.DefaultTransport
@@ -33,34 +40,81 @@ func newPoliteTransport(base http.RoundTripper) *politeTransport {
 	return &politeTransport{base: base}
 }
 
-func (transport *politeTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	host := canonicalHost(request.URL.Hostname())
-	stateValue, _ := transport.hosts.LoadOrStore(host, &hostFetchState{
-		token: make(chan struct{}, 1),
-	})
-	state := stateValue.(*hostFetchState)
+func (transport *politeTransport) Do(client *http.Client, request *http.Request) (*http.Response, error) {
+	state := transport.hostState(request.URL.Hostname())
 	if err := acquireHostFetch(request.Context(), state); err != nil {
 		return nil, err
 	}
-
 	requestContext, cancel := context.WithTimeout(request.Context(), feedRequestTimeout)
-	request = request.Clone(requestContext)
-	response, err := transport.base.RoundTrip(request)
+	scheduled := &scheduledHostFetch{state: state}
+	request = request.Clone(context.WithValue(requestContext, scheduledHostFetchKey{}, scheduled))
+	response, err := client.Do(request)
 	if err != nil {
 		cancel()
-		releaseHostFetch(state)
 		return nil, err
 	}
 	if response.Body == nil {
 		cancel()
+		return response, nil
+	}
+	response.Body = &timeoutBody{ReadCloser: response.Body, cancel: cancel}
+	return response, nil
+}
+
+func doRequest(client *http.Client, request *http.Request) (*http.Response, error) {
+	if transport, ok := client.Transport.(*politeTransport); ok {
+		return transport.Do(client, request)
+	}
+	return client.Do(request)
+}
+
+func (transport *politeTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	var state *hostFetchState
+	var cancel context.CancelFunc
+	if scheduled, ok := request.Context().Value(scheduledHostFetchKey{}).(*scheduledHostFetch); ok {
+		scheduled.once.Do(func() {
+			state = scheduled.state
+		})
+	}
+	if state == nil {
+		state = transport.hostState(request.URL.Hostname())
+		if err := acquireHostFetch(request.Context(), state); err != nil {
+			return nil, err
+		}
+		requestContext, requestCancel := context.WithTimeout(request.Context(), feedRequestTimeout)
+		cancel = requestCancel
+		request = request.Clone(requestContext)
+	}
+
+	response, err := transport.base.RoundTrip(request)
+	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
+		releaseHostFetch(state)
+		return nil, err
+	}
+	if response.Body == nil {
+		if cancel != nil {
+			cancel()
+		}
 		releaseHostFetch(state)
 		return response, nil
 	}
 	response.Body = &hostFetchBody{ReadCloser: response.Body, release: func() {
-		cancel()
+		if cancel != nil {
+			cancel()
+		}
 		releaseHostFetch(state)
 	}}
 	return response, nil
+}
+
+func (transport *politeTransport) hostState(host string) *hostFetchState {
+	stateValue, _ := transport.hosts.LoadOrStore(canonicalHost(host), &hostFetchState{
+		token: make(chan struct{}, 1),
+	})
+	return stateValue.(*hostFetchState)
 }
 
 func canonicalHost(host string) string {
@@ -102,6 +156,18 @@ type hostFetchBody struct {
 	io.ReadCloser
 	once    sync.Once
 	release func()
+}
+
+type timeoutBody struct {
+	io.ReadCloser
+	once   sync.Once
+	cancel context.CancelFunc
+}
+
+func (body *timeoutBody) Close() error {
+	err := body.ReadCloser.Close()
+	body.once.Do(body.cancel)
+	return err
 }
 
 func (body *hostFetchBody) Close() error {

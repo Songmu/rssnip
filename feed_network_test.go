@@ -120,10 +120,8 @@ func TestPoliteTransportSerializesConcurrentCanonicalHosts(t *testing.T) {
 		t.Fatal("second request did not start")
 	}
 	deadline := <-secondDeadline
-	if !deadline.IsZero() {
-		if untilDeadline := time.Until(deadline); untilDeadline < feedRequestTimeout-100*time.Millisecond {
-			t.Errorf("second request timeout = %s, want approximately %s", untilDeadline, feedRequestTimeout)
-		}
+	if untilDeadline := time.Until(deadline); untilDeadline < feedRequestTimeout-100*time.Millisecond {
+		t.Errorf("second request timeout = %s, want approximately %s", untilDeadline, feedRequestTimeout)
 	}
 	result := <-done
 	if result.err != nil {
