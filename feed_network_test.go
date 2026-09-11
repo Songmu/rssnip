@@ -143,6 +143,7 @@ func TestCanonicalHost(t *testing.T) {
 		{"example.com。", "example.com"},
 		{"example.com．", "example.com"},
 		{"example.com｡", "example.com"},
+		{"foo_bar.example", "foo_bar.example"},
 		{"192.0.2.1", "192.0.2.1"},
 		{"2001:DB8::0:1", "2001:db8::1"},
 		{"fe80::1%en0", "fe80::1%en0"},
