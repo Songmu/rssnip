@@ -223,7 +223,8 @@ func TestFetchFeedsLimitsConcurrentHosts(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- fetchFeeds(context.Background(), &http.Client{Transport: transport}, urls, 1, nil, false,
+		done <- fetchFeeds(context.Background(), urls,
+			[]Option{WithHTTPClient(&http.Client{Transport: transport}), WithMaxPages(1)},
 			func(_ []Item) error { return nil })
 	}()
 	for range maxConcurrentFetches {
@@ -261,7 +262,8 @@ func TestFetchFeedsBackpressuresCompletedFeeds(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- fetchFeeds(context.Background(), &http.Client{Transport: transport}, urls, 1, nil, false,
+		done <- fetchFeeds(context.Background(), urls,
+			[]Option{WithHTTPClient(&http.Client{Transport: transport}), WithMaxPages(1)},
 			func(_ []Item) error { return nil })
 	}()
 	for range maxConcurrentFetches {
