@@ -27,8 +27,10 @@
 // never fetches anything, so cancellation and timeouts belong to the caller.
 //
 // Unparseable documents match ErrNotFeed, documents that advertise no feed link
-// match ErrNoFeedFound, and non-2xx responses return a *StatusError. Errors
-// carry no partial items and report URLs with any userinfo removed. Use
+// match ErrNoFeedFound, and non-2xx responses return a *StatusError, except that
+// a 404 or 410 response to a guessed WordPress pagination page ends pagination
+// and keeps the items collected so far. Errors carry no partial items and report
+// URLs with any userinfo removed. Use
 // [github.com/Songmu/rssnip/feediscovery] to list the feed links an HTML page
 // advertises without fetching them.
 package rssnip

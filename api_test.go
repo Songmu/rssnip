@@ -315,15 +315,23 @@ func TestParseFiltersByPeriod(t *testing.T) {
 
 func TestParseRejectsHTMLDocument(t *testing.T) {
 	t.Parallel()
-	document := `<!DOCTYPE html><html><head>
-	  <link rel="alternate" type="application/rss+xml" href="/feed.xml"></head></html>`
-	for _, contentType := range []string{"text/html; charset=utf-8", ""} {
-		_, err := rssnip.Parse(strings.NewReader(document), "https://example.com/blog", contentType)
-		if !errors.Is(err, rssnip.ErrNotFeed) {
-			t.Fatalf("content type %q: error = %v, want ErrNotFeed", contentType, err)
-		}
-		if !strings.Contains(err.Error(), "feediscovery.FindAll") {
-			t.Errorf("content type %q: error = %v, want a discovery hint", contentType, err)
+	documents := map[string]string{
+		"doctype": `<!DOCTYPE html><html><head>
+	  <link rel="alternate" type="application/rss+xml" href="/feed.xml"></head></html>`,
+		"byte order mark and comment": "\ufeff<!-- hello --><!DOCTYPE html><html></html>",
+		"head only":                   `<head><title>Blog</title></head>`,
+	}
+	for name, document := range documents {
+		for _, contentType := range []string{"text/html; charset=utf-8", ""} {
+			_, err := rssnip.Parse(strings.NewReader(document), "https://example.com/blog", contentType)
+			if !errors.Is(err, rssnip.ErrNotFeed) {
+				t.Fatalf("%s with content type %q: error = %v, want ErrNotFeed",
+					name, contentType, err)
+			}
+			if !strings.Contains(err.Error(), "feediscovery.FindAll") {
+				t.Errorf("%s with content type %q: error = %v, want a discovery hint",
+					name, contentType, err)
+			}
 		}
 	}
 }

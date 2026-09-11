@@ -318,7 +318,9 @@ items, err := rssnip.Fetch(ctx, "https://example.com/blog",
 Options are `WithHTTPClient`, `WithUserAgent`, `WithMaxPages`, `WithSince`,
 `WithUntil`, `WithPreferUpdated`, and `WithDiscovery`; invalid values are
 reported by `Fetch` and `Parse`. Non-2xx responses return a `*StatusError`,
-unparseable documents match `ErrNotFeed`, and pages advertising no feed match
+except that a 404 or 410 response to a guessed WordPress pagination page ends
+pagination and keeps the items collected so far. Unparseable documents match
+`ErrNotFeed`, and pages advertising no feed match
 `ErrNoFeedFound`. The [`feediscovery`](https://pkg.go.dev/github.com/Songmu/rssnip/feediscovery)
 subpackage lists the feed links an HTML page advertises without fetching them.
 See the [package documentation](https://pkg.go.dev/github.com/Songmu/rssnip)

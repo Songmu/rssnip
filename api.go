@@ -5,11 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/Songmu/rssnip/feediscovery"
 )
 
 // ErrNotFeed indicates that a document could not be parsed as a supported feed.
@@ -171,7 +172,9 @@ func WithDiscovery(discovery bool) Option {
 // WithMaxPages documents, skipping items whose ID was already seen. Each
 // document is limited to MaxFeedSize bytes.
 //
-// A non-2xx response returns a *StatusError. A document that is neither a feed
+// A non-2xx response returns a *StatusError, except that a 404 or 410 response
+// to a guessed WordPress pagination page ends pagination and returns the items
+// collected so far. A document that is neither a feed
 // nor a page advertising one matches ErrNoFeedFound, and every unparseable
 // document matches ErrNotFeed. Errors never carry partial items, and URLs in
 // error messages have any userinfo removed.
@@ -223,7 +226,7 @@ func Parse(r io.Reader, sourceURL, contentType string, opts ...Option) ([]Item, 
 	}
 	items, _, err := parseFeedDetails(body, displayURL(sourceURL))
 	if err != nil {
-		if isHTMLDocument(body, contentType) {
+		if feediscovery.LooksLikeHTML(body, contentType) {
 			return nil, notFeed(fmt.Errorf(
 				"%w; the document is an HTML page: use feediscovery.FindAll to list its feed links", err))
 		}
@@ -268,15 +271,4 @@ func readFeedDocument(r io.Reader, sourceURL string) ([]byte, error) {
 			displayURL(sourceURL), maxFeedSize>>20)
 	}
 	return body, nil
-}
-
-func isHTMLDocument(body []byte, contentType string) bool {
-	if mediaType, _, err := mime.ParseMediaType(contentType); err == nil {
-		switch strings.ToLower(mediaType) {
-		case "text/html", "application/xhtml+xml":
-			return true
-		}
-	}
-	prefix := strings.ToLower(strings.TrimSpace(string(body[:min(len(body), 512)])))
-	return strings.HasPrefix(prefix, "<!doctype html") || strings.HasPrefix(prefix, "<html")
 }

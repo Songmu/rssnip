@@ -58,7 +58,7 @@ func FindAll(r io.Reader, pageURL, contentType string) ([]Link, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(body) == 0 || !looksLikeHTML(body, contentType) {
+	if len(body) == 0 || !LooksLikeHTML(body, contentType) {
 		return nil, nil
 	}
 	reader, err := discoveryReader(body, contentType)
