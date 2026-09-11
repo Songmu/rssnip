@@ -116,12 +116,12 @@ func TestPoliteTransportSerializesConcurrentCanonicalHosts(t *testing.T) {
 		if got := startedAt.Sub(closedAt); got < hostFetchInterval {
 			t.Errorf("second request started after %s, want at least %s", got, hostFetchInterval)
 		}
+		deadline := <-secondDeadline
+		if timeout := deadline.Sub(startedAt); timeout < feedRequestTimeout-100*time.Millisecond {
+			t.Errorf("second request timeout = %s, want approximately %s", timeout, feedRequestTimeout)
+		}
 	case <-time.After(2 * hostFetchInterval):
 		t.Fatal("second request did not start")
-	}
-	deadline := <-secondDeadline
-	if untilDeadline := time.Until(deadline); untilDeadline < feedRequestTimeout-100*time.Millisecond {
-		t.Errorf("second request timeout = %s, want approximately %s", untilDeadline, feedRequestTimeout)
 	}
 	result := <-done
 	if result.err != nil {
@@ -138,6 +138,8 @@ func TestCanonicalHost(t *testing.T) {
 		want string
 	}{
 		{"EXAMPLE.com.", "example.com"},
+		{"bücher.example", "xn--bcher-kva.example"},
+		{"xn--bcher-kva.example", "xn--bcher-kva.example"},
 		{"192.0.2.1", "192.0.2.1"},
 		{"2001:DB8::0:1", "2001:db8::1"},
 		{"fe80::1%en0", "fe80::1%en0"},

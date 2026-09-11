@@ -177,6 +177,14 @@ func fetchFeeds(
 	}()
 
 	pending := make(map[int]result, maxConcurrentFetches)
+	hasPendingError := func() bool {
+		for _, result := range pending {
+			if result.err != nil {
+				return true
+			}
+		}
+		return false
+	}
 	nextJob := 0
 	dispatch := func() error {
 		select {
@@ -199,7 +207,7 @@ func fetchFeeds(
 				if err := consume(result.items, result.err); err != nil {
 					return err
 				}
-				if nextJob < len(urls) {
+				if nextJob < len(urls) && !hasPendingError() {
 					if err := dispatch(); err != nil {
 						return err
 					}
