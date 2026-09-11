@@ -70,6 +70,34 @@ func TestPoliteTransportSpacesRequestsToSameHost(t *testing.T) {
 	}
 }
 
+func TestPoliteTransportPacesPagination(t *testing.T) {
+	var mu sync.Mutex
+	var starts []time.Time
+	transport := roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		mu.Lock()
+		starts = append(starts, time.Now())
+		mu.Unlock()
+		body := `{"version":"https://jsonfeed.org/version/1.1","items":[]}`
+		if request.URL.Path == "/one" {
+			body = `{"version":"https://jsonfeed.org/version/1.1","next_url":"/two","items":[]}`
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Header:     make(http.Header),
+		}, nil
+	})
+	client := &http.Client{Transport: newPoliteTransport(transport)}
+	if _, err := fetchFeedPages(context.Background(), client, "https://example.com/one", 2); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if got := starts[1].Sub(starts[0]); got < hostFetchInterval {
+		t.Errorf("pagination interval = %s, want at least %s", got, hostFetchInterval)
+	}
+}
+
 func TestFetchFeedsLimitsConcurrentHosts(t *testing.T) {
 	const feed = `{"version":"https://jsonfeed.org/version/1.1","items":[]}`
 	started := make(chan struct{}, maxConcurrentFetches)
