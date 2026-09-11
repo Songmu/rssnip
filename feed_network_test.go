@@ -15,6 +15,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/net/idna"
 )
 
 type errorTransport struct{ err error }
@@ -134,22 +136,28 @@ func TestPoliteTransportSerializesConcurrentCanonicalHosts(t *testing.T) {
 
 func TestCanonicalHost(t *testing.T) {
 	tests := []struct {
-		host string
-		want string
+		host    string
+		want    string
+		invalid bool
 	}{
-		{"EXAMPLE.com.", "example.com"},
-		{"bücher.example", "xn--bcher-kva.example"},
-		{"xn--bcher-kva.example", "xn--bcher-kva.example"},
-		{"example.com。", "example.com"},
-		{"example.com．", "example.com"},
-		{"example.com｡", "example.com"},
-		{"foo_bar.example", "foo_bar.example"},
-		{"192.0.2.1", "192.0.2.1"},
-		{"2001:DB8::0:1", "2001:db8::1"},
-		{"fe80::1%en0", "fe80::1%en0"},
+		{host: "EXAMPLE.com.", want: "example.com"},
+		{host: "bücher.example", want: "xn--bcher-kva.example"},
+		{host: "xn--bcher-kva.example", want: "xn--bcher-kva.example"},
+		{host: "example.com。", want: "example.com"},
+		{host: "example.com．", want: "example.com"},
+		{host: "example.com｡", want: "example.com"},
+		{host: "foo_bar.example", want: "foo_bar.example", invalid: true},
+		{host: "192.0.2.1", want: "192.0.2.1"},
+		{host: "2001:DB8::0:1", want: "2001:db8::1"},
+		{host: "fe80::1%en0", want: "fe80::1%en0"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.host, func(t *testing.T) {
+			if tt.invalid {
+				if _, err := idna.Lookup.ToASCII(tt.host); err == nil {
+					t.Fatalf("idna.Lookup.ToASCII(%q) succeeded, want error", tt.host)
+				}
+			}
 			if got := canonicalHost(tt.host); got != tt.want {
 				t.Errorf("canonicalHost(%q) = %q, want %q", tt.host, got, tt.want)
 			}
