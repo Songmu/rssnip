@@ -6,17 +6,115 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 type errorTransport struct{ err error }
 
 func (transport errorTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, transport.err
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (roundTrip roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return roundTrip(request)
+}
+
+type recordingTransport struct {
+	mu    sync.Mutex
+	start []time.Time
+	body  string
+}
+
+func (transport *recordingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	transport.mu.Lock()
+	transport.start = append(transport.start, time.Now())
+	transport.mu.Unlock()
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(transport.body)),
+		Header:     make(http.Header),
+	}, nil
+}
+
+func (transport *recordingTransport) starts() []time.Time {
+	transport.mu.Lock()
+	defer transport.mu.Unlock()
+	return append([]time.Time(nil), transport.start...)
+}
+
+func TestPoliteTransportSpacesRequestsToSameHost(t *testing.T) {
+	transport := &recordingTransport{}
+	client := &http.Client{Transport: newPoliteTransport(transport)}
+	for _, path := range []string{"/one", "/two"} {
+		response, err := client.Get("https://example.com" + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := response.Body.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	starts := transport.starts()
+	if got := starts[1].Sub(starts[0]); got < hostFetchInterval {
+		t.Errorf("request interval = %s, want at least %s", got, hostFetchInterval)
+	}
+}
+
+func TestFetchFeedsLimitsConcurrentHosts(t *testing.T) {
+	const feed = `{"version":"https://jsonfeed.org/version/1.1","items":[]}`
+	started := make(chan struct{}, maxConcurrentFetches)
+	release := make(chan struct{})
+	var mu sync.Mutex
+	inFlight, maximum := 0, 0
+	transport := roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		mu.Lock()
+		inFlight++
+		if inFlight > maximum {
+			maximum = inFlight
+		}
+		mu.Unlock()
+		started <- struct{}{}
+		<-release
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(feed)),
+			Header:     make(http.Header),
+		}, nil
+	})
+	urls := make([]string, maxConcurrentFetches+1)
+	for index := range urls {
+		urls[index] = (&url.URL{Scheme: "https", Host: fmt.Sprintf("host-%d.example", index)}).String()
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := fetchFeeds(context.Background(), &http.Client{Transport: transport}, urls, 1, nil, false)
+		done <- err
+	}()
+	for range maxConcurrentFetches {
+		<-started
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if maximum != maxConcurrentFetches {
+		t.Errorf("maximum concurrent requests = %d, want %d", maximum, maxConcurrentFetches)
+	}
 }
 
 func TestFetchFeedPreservesNetworkErrors(t *testing.T) {

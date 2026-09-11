@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -109,13 +110,16 @@ func runInLocation(
 		return err
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	for _, feedURL := range urls {
-		feedItems, err := fetchFeedPagesSince(
-			ctx, client, feedURL, *maxPages, since, *preferUpdated)
-		if err != nil {
-			return err
-		}
+	client := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: newPoliteTransport(nil),
+	}
+	feedItemsByURL, err := fetchFeeds(
+		ctx, client, urls, *maxPages, since, *preferUpdated)
+	if err != nil {
+		return err
+	}
+	for _, feedItems := range feedItemsByURL {
 		filtered := feedItems
 		if since != nil || until != nil {
 			filtered = feedItems[:0]
@@ -130,6 +134,39 @@ func runInLocation(
 		}
 	}
 	return nil
+}
+
+func fetchFeeds(
+	ctx context.Context,
+	client *http.Client,
+	urls []string,
+	maxPages int,
+	since *time.Time,
+	preferUpdated bool,
+) ([][]Item, error) {
+	items := make([][]Item, len(urls))
+	errors := make([]error, len(urls))
+	jobs := make(chan int)
+	var workers sync.WaitGroup
+	for range min(maxConcurrentFetches, len(urls)) {
+		workers.Go(func() {
+			for index := range jobs {
+				items[index], errors[index] = fetchFeedPagesSince(
+					ctx, client, urls[index], maxPages, since, preferUpdated)
+			}
+		})
+	}
+	for index := range urls {
+		jobs <- index
+	}
+	close(jobs)
+	workers.Wait()
+	for _, err := range errors {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
 }
 
 func readStdinURLs(in io.Reader) ([]string, error) {
