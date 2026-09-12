@@ -270,7 +270,7 @@ func validateDocumentURL(documentURL string) error {
 func validateHTTPURL(value string) error {
 	parsed, err := url.ParseRequestURI(value)
 	if err != nil {
-		return err
+		return errAbsoluteHTTPURL
 	}
 	if parsed.Hostname() == "" ||
 		(parsed.Scheme != "http" && parsed.Scheme != "https") {

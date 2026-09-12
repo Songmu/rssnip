@@ -30,6 +30,10 @@ func userinfoURL() string {
 	return "https://user:" + "hunter2" + "@example.com/feed.json"
 }
 
+func malformedUserinfoURL() string {
+	return "https://user:" + "hunter2" + "@example.com/%zz"
+}
+
 func itemIDs(items []rssnip.Item) []string {
 	ids := make([]string, 0, len(items))
 	for _, item := range items {
@@ -235,6 +239,7 @@ func TestFetchRejectsInvalidOptionsAndURLs(t *testing.T) {
 		{"unsupported scheme", "file:///feed.json", nil, "invalid feed URL"},
 		{"empty hostname", "http://:80/feed.json", nil, "invalid feed URL"},
 		{"userinfo", userinfoURL(), nil, "userinfo is not allowed"},
+		{"malformed URL with userinfo", malformedUserinfoURL(), nil, "invalid feed URL"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
