@@ -309,16 +309,8 @@ func fetchFeedPage(ctx context.Context, opts *options, feedURL string, allowDisc
 }
 
 func fetchFeedDocument(ctx context.Context, opts *options, feedURL string) ([]byte, string, string, error) {
-	parsedURL, err := url.ParseRequestURI(feedURL)
-	if err != nil || parsedURL.Host == "" || parsedURL.Hostname() == "" ||
-		(parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-		if err == nil {
-			err = fmt.Errorf("must be an absolute HTTP or HTTPS URL")
-		}
+	if err := validateHTTPURL(feedURL); err != nil {
 		return nil, "", "", fmt.Errorf("invalid feed URL %q: %w", displayURL(feedURL), err)
-	}
-	if parsedURL.User != nil {
-		return nil, "", "", fmt.Errorf("invalid feed URL %q: userinfo is not allowed", displayURL(feedURL))
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
 	if err != nil {
@@ -349,12 +341,9 @@ func fetchFeedDocument(ctx context.Context, opts *options, feedURL string) ([]by
 	if resp.ContentLength > maxFeedSize {
 		return nil, "", "", fmt.Errorf("read %q: feed exceeds %d MiB limit", displayURL(feedURL), maxFeedSize>>20)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxFeedSize+1))
+	body, err := readFeedDocument(resp.Body, feedURL)
 	if err != nil {
-		return nil, "", "", fmt.Errorf("read %q: %w", displayURL(feedURL), err)
-	}
-	if len(body) > maxFeedSize {
-		return nil, "", "", fmt.Errorf("read %q: feed exceeds %d MiB limit", displayURL(feedURL), maxFeedSize>>20)
+		return nil, "", "", err
 	}
 	sourceURL := feedURL
 	if resp.Request != nil && resp.Request.URL != nil {
@@ -490,16 +479,14 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 	}
 	info := FeedInfo{
 		Title:       feed.Title,
-		HomePageURL: feed.HomePageURL,
+		HomePageURL: resolveURL(sourceURL, feed.HomePageURL),
 		FeedURL:     sourceURL,
 	}
-	feedAuthors := append([]Author(nil), feed.Authors...)
-	if len(feedAuthors) == 0 && feed.Author != nil {
-		feedAuthors = append(feedAuthors, *feed.Author)
-	}
+	feedAuthors := jsonFeedAuthors(sourceURL, feed.Authors, feed.Author)
 	items := make([]Item, 0, len(feed.Items))
 	for _, source := range feed.Items {
-		id := firstNonEmpty(source.ID, source.URL)
+		itemURL := resolveURL(sourceURL, source.URL)
+		id := firstNonEmpty(source.ID, itemURL)
 		if id == "" {
 			var err error
 			id, err = generatedJSONFeedID(source)
@@ -507,23 +494,20 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 				return nil, false, fmt.Errorf("generate item ID for feed %q: %w", sourceURL, err)
 			}
 		}
-		authors := append([]Author(nil), source.Authors...)
-		if len(authors) == 0 && source.Author != nil {
-			authors = append(authors, *source.Author)
-		}
+		authors := jsonFeedAuthors(sourceURL, source.Authors, source.Author)
 		if len(authors) == 0 {
 			authors = append(authors, feedAuthors...)
 		}
 		item := Item{
 			ID:            id,
-			URL:           source.URL,
-			ExternalURL:   source.ExternalURL,
+			URL:           itemURL,
+			ExternalURL:   resolveURL(sourceURL, source.ExternalURL),
 			Title:         source.Title,
 			ContentHTML:   source.ContentHTML,
 			ContentText:   source.ContentText,
 			Summary:       source.Summary,
-			Image:         source.Image,
-			BannerImage:   source.BannerImage,
+			Image:         resolveURL(sourceURL, source.Image),
+			BannerImage:   resolveURL(sourceURL, source.BannerImage),
 			DatePublished: normalizeDate(source.DatePublished),
 			DateModified:  normalizeDate(source.DateModified),
 			Authors:       authors,
@@ -531,13 +515,27 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 			Feed:          info,
 		}
 		for _, attachment := range source.Attachments {
-			if normalized, ok := normalizeAttachment(Attachment(attachment)); ok {
+			candidate := Attachment(attachment)
+			candidate.URL = resolveURL(sourceURL, candidate.URL)
+			if normalized, ok := normalizeAttachment(candidate); ok {
 				item.Attachments = append(item.Attachments, normalized)
 			}
 		}
 		items = append(items, item)
 	}
 	return items, true, nil
+}
+
+func jsonFeedAuthors(baseURL string, authors []Author, legacy *Author) []Author {
+	normalized := append([]Author(nil), authors...)
+	if len(normalized) == 0 && legacy != nil {
+		normalized = append(normalized, *legacy)
+	}
+	for i := range normalized {
+		normalized[i].URL = resolveURL(baseURL, normalized[i].URL)
+		normalized[i].Avatar = resolveURL(baseURL, normalized[i].Avatar)
+	}
+	return normalized
 }
 
 func nextPageURL(body []byte, sourceURL string) (string, error) {

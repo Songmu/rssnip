@@ -20,6 +20,11 @@ var ErrNotFeed = errors.New("rssnip: document is not a supported feed")
 // link that could be followed.
 var ErrNoFeedFound = errors.New("rssnip: no feed found for document")
 
+var (
+	errAbsoluteHTTPURL = errors.New("must be an absolute HTTP or HTTPS URL")
+	errURLUserinfo     = errors.New("userinfo is not allowed")
+)
+
 // notFeedError attaches sentinels to a cause while preserving its message.
 type notFeedError struct {
 	cause     error
@@ -169,7 +174,8 @@ func WithDiscovery(discovery bool) Option {
 // at a feed or, unless WithDiscovery(false) is set, at an HTML page advertising
 // one; the first advertised link is then fetched instead. Fetch follows Atom
 // rel="next" links, JSON Feed next_url, and WordPress paged feeds up to
-// WithMaxPages documents, skipping items whose ID was already seen. Each
+// WithMaxPages feed pages, skipping items whose ID was already seen. The
+// initial HTML discovery document, if any, is not counted. Each retrieved
 // document is limited to MaxFeedSize bytes.
 //
 // A non-2xx response returns a *StatusError, except that a 404 or 410 response
@@ -249,14 +255,28 @@ func filterItems(items []Item, opts *options) []Item {
 }
 
 func validateDocumentURL(documentURL string) error {
-	parsed, err := url.ParseRequestURI(documentURL)
-	if err != nil || parsed.Host == "" ||
-		(parsed.Scheme != "http" && parsed.Scheme != "https") {
+	err := validateHTTPURL(documentURL)
+	if errors.Is(err, errURLUserinfo) {
+		return fmt.Errorf("rssnip: source URL %q must not contain userinfo", displayURL(documentURL))
+	}
+	if err != nil {
 		return fmt.Errorf("rssnip: source URL %q must be an absolute HTTP or HTTPS URL",
 			displayURL(documentURL))
 	}
+	return nil
+}
+
+func validateHTTPURL(value string) error {
+	parsed, err := url.ParseRequestURI(value)
+	if err != nil {
+		return err
+	}
+	if parsed.Hostname() == "" ||
+		(parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return errAbsoluteHTTPURL
+	}
 	if parsed.User != nil {
-		return fmt.Errorf("rssnip: source URL %q must not contain userinfo", displayURL(documentURL))
+		return errURLUserinfo
 	}
 	return nil
 }

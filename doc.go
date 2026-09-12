@@ -10,10 +10,11 @@
 // Fetch accepts a feed URL or an HTML page advertising one. Discovery inspects
 // only the first retrieved document, uses the first advertised link, and can be
 // turned off with WithDiscovery. Pagination follows Atom rel="next" links, JSON
-// Feed next_url, and WordPress paged feeds, stops at WithMaxPages documents or
-// at a repeated URL, and drops items whose ID was already seen. With WithSince,
-// pagination may also stop early once a feed is observed to be ordered by date
-// and to have run past the requested boundary.
+// Feed next_url, and WordPress paged feeds, stops at WithMaxPages feed pages or
+// at a repeated URL, and drops items whose ID was already seen. An initial HTML
+// discovery document is not counted as a feed page. With WithSince, pagination
+// may also stop early once a feed is observed to be ordered by date and to have
+// run past the requested boundary.
 //
 // WithSince and WithUntil select the half-open interval [since, until) using
 // each item's published date, or its updated date under WithPreferUpdated. The

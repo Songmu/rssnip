@@ -185,14 +185,8 @@ func LooksLikeHTML(body []byte, contentType string) bool {
 		case html.DoctypeToken:
 			return strings.EqualFold(tokenizer.Token().Data, "html")
 		case html.StartTagToken, html.SelfClosingTagToken:
-			switch tokenizer.Token().DataAtom {
-			case htmlatom.Html, htmlatom.Head, htmlatom.Body, htmlatom.Title,
-				htmlatom.Meta, htmlatom.Link, htmlatom.Base, htmlatom.Template,
-				htmlatom.Script, htmlatom.Style, htmlatom.Noscript:
-				return true
-			default:
-				return false
-			}
+			atom := tokenizer.Token().DataAtom
+			return atom != 0 && atom != htmlatom.Svg && atom != htmlatom.Math
 		default:
 			return false
 		}

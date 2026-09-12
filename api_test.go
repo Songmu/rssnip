@@ -252,8 +252,8 @@ func TestFetchRejectsInvalidOptionsAndURLs(t *testing.T) {
 
 func TestFetchRejectsNilContext(t *testing.T) {
 	t.Parallel()
-	//nolint:staticcheck // the nil context is the behavior under test
-	_, err := rssnip.Fetch(nil, "https://example.com/feed.json")
+	var ctx context.Context
+	_, err := rssnip.Fetch(ctx, "https://example.com/feed.json")
 	if err == nil || !strings.Contains(err.Error(), "context must not be nil") {
 		t.Fatalf("error = %v, want a nil context error", err)
 	}
@@ -282,6 +282,47 @@ func TestParseReadsFeedWithoutNetworkAccess(t *testing.T) {
 	}
 	if items[0].DatePublished != "2026-01-02T03:04:05Z" {
 		t.Errorf("date = %q, want RFC3339", items[0].DatePublished)
+	}
+}
+
+func TestParseResolvesJSONFeedURLs(t *testing.T) {
+	t.Parallel()
+	document := `{
+	  "version": "https://jsonfeed.org/version/1.1",
+	  "home_page_url": "/blog",
+	  "authors": [{"name": "Feed Author", "url": "/authors/feed", "avatar": "/feed.png"}],
+	  "items": [{
+	    "id": "item",
+	    "url": "/posts/1",
+	    "external_url": "/elsewhere/1",
+	    "image": "/images/1.png",
+	    "banner_image": "/banners/1.png",
+	    "authors": [{"name": "Item Author", "url": "/authors/item", "avatar": "/item.png"}],
+	    "attachments": [{"url": "/audio/1.mp3", "mime_type": "audio/mpeg"}]
+	  }]
+	}`
+	items, err := rssnip.Parse(strings.NewReader(document),
+		"https://example.com/feeds/feed.json", "application/feed+json")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %v, want one item", itemIDs(items))
+	}
+	item := items[0]
+	for name, values := range map[string]struct{ got, want string }{
+		"home page":  {item.Feed.HomePageURL, "https://example.com/blog"},
+		"item":       {item.URL, "https://example.com/posts/1"},
+		"external":   {item.ExternalURL, "https://example.com/elsewhere/1"},
+		"image":      {item.Image, "https://example.com/images/1.png"},
+		"banner":     {item.BannerImage, "https://example.com/banners/1.png"},
+		"author URL": {item.Authors[0].URL, "https://example.com/authors/item"},
+		"avatar":     {item.Authors[0].Avatar, "https://example.com/item.png"},
+		"attachment": {item.Attachments[0].URL, "https://example.com/audio/1.mp3"},
+	} {
+		if values.got != values.want {
+			t.Errorf("%s URL = %q, want %q", name, values.got, values.want)
+		}
 	}
 }
 
@@ -321,6 +362,7 @@ func TestParseRejectsHTMLDocument(t *testing.T) {
 	  <link rel="alternate" type="application/rss+xml" href="/feed.xml"></head></html>`,
 		"byte order mark and comment": "\ufeff<!-- hello --><!DOCTYPE html><html></html>",
 		"head only":                   `<head><title>Blog</title></head>`,
+		"body element first":          `<main><h1>Blog</h1></main>`,
 	}
 	for name, document := range documents {
 		for _, contentType := range []string{"text/html; charset=utf-8", ""} {
@@ -347,6 +389,8 @@ func TestParseRejectsInvalidInput(t *testing.T) {
 	}{
 		{"nil reader", nil, "https://example.com/feed.json", "document reader is nil"},
 		{"relative source URL", strings.NewReader("{}"), "/feed.json",
+			"must be an absolute HTTP or HTTPS URL"},
+		{"source URL with empty hostname", strings.NewReader("{}"), "https://:443/feed.json",
 			"must be an absolute HTTP or HTTPS URL"},
 		{"source URL with userinfo", strings.NewReader("{}"),
 			userinfoURL(), "must not contain userinfo"},
