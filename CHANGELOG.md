@@ -1,5 +1,11 @@
 # Changelog
 
+## [v0.0.2](https://github.com/Songmu/rssnip/compare/v0.0.1...v0.0.2) - 2026-09-12
+
+- Fail fast on feed errors by @Songmu in https://github.com/Songmu/rssnip/pull/22
+- Fetch feeds concurrently with per-host pacing by @Songmu with @Copilot in https://github.com/Songmu/rssnip/pull/21
+- Add a public Fetch/Parse library interface by @Songmu with @Copilot in https://github.com/Songmu/rssnip/pull/24
+
 ## [v0.0.1](https://github.com/Songmu/rssnip/commits/v0.0.1) - 2026-09-10
 
 - Bump codecov/codecov-action from 5 to 7 by @dependabot[bot] in https://github.com/Songmu/rssnip/pull/3
