@@ -157,7 +157,12 @@ func tokenAttrValue(token html.Token, name string) (string, bool) {
 	return "", false
 }
 
-func looksLikeHTML(body []byte, contentType string) bool {
+// LooksLikeHTML reports whether a document should be treated as HTML or XHTML.
+// A text/html or application/xhtml+xml contentType is decisive; otherwise the
+// document's first significant token decides, so a byte order mark, leading
+// comments, and an omitted html element are tolerated. contentType may be empty
+// when unknown.
+func LooksLikeHTML(body []byte, contentType string) bool {
 	if mediaType, _, err := mime.ParseMediaType(contentType); err == nil {
 		switch strings.ToLower(mediaType) {
 		case "text/html", "application/xhtml+xml":
@@ -180,14 +185,8 @@ func looksLikeHTML(body []byte, contentType string) bool {
 		case html.DoctypeToken:
 			return strings.EqualFold(tokenizer.Token().Data, "html")
 		case html.StartTagToken, html.SelfClosingTagToken:
-			switch tokenizer.Token().DataAtom {
-			case htmlatom.Html, htmlatom.Head, htmlatom.Body, htmlatom.Title,
-				htmlatom.Meta, htmlatom.Link, htmlatom.Base, htmlatom.Template,
-				htmlatom.Script, htmlatom.Style, htmlatom.Noscript:
-				return true
-			default:
-				return false
-			}
+			atom := tokenizer.Token().DataAtom
+			return atom != 0 && atom != htmlatom.Svg && atom != htmlatom.Math
 		default:
 			return false
 		}

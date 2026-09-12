@@ -23,19 +23,27 @@ import (
 	"golang.org/x/net/html/charset"
 )
 
-const userAgent = "rssnip/" + version
-const maxFeedSize = 32 << 20
+const defaultUserAgent = "rssnip/" + version
+
+// MaxFeedSize is the maximum size in bytes of a single feed document.
+const MaxFeedSize = 32 << 20
+
+const maxFeedSize = MaxFeedSize
 const defaultMaxPages = 10
 const minDateOrderSamples = 5
 
-type httpStatusError struct {
-	url        string
-	status     string
-	statusCode int
+// StatusError reports a feed response with a non-2xx HTTP status.
+type StatusError struct {
+	// URL is the requested feed URL with any userinfo removed.
+	URL string
+	// Status is the HTTP status line, such as "404 Not Found".
+	Status string
+	// StatusCode is the HTTP status code, such as 404.
+	StatusCode int
 }
 
-func (err *httpStatusError) Error() string {
-	return fmt.Sprintf("fetch %q: unexpected HTTP status %s", displayURL(err.url), err.status)
+func (err *StatusError) Error() string {
+	return fmt.Sprintf("fetch %q: unexpected HTTP status %s", err.URL, err.Status)
 }
 
 type paginationMode int
@@ -191,6 +199,16 @@ func fetchFeedPagesSince(
 	since *time.Time,
 	preferUpdated bool,
 ) ([]Item, error) {
+	opts := defaultOptions()
+	opts.client = client
+	opts.maxPages = maxPages
+	opts.since = since
+	opts.preferUpdated = preferUpdated
+	return fetchFeedPagesWithOptions(ctx, feedURL, opts)
+}
+
+func fetchFeedPagesWithOptions(ctx context.Context, feedURL string, opts *options) ([]Item, error) {
+	maxPages, since, preferUpdated := opts.maxPages, opts.since, opts.preferUpdated
 	items := make([]Item, 0)
 	seenItems := make(map[string]struct{})
 	seenURLs := make(map[string]struct{})
@@ -205,7 +223,8 @@ func fetchFeedPagesSince(
 		}
 		seenURLs[nextURL] = struct{}{}
 
-		pageItems, sourceURL, followingURL, wordPress, err := fetchFeedPage(ctx, client, nextURL, page == 0)
+		pageItems, sourceURL, followingURL, wordPress, err := fetchFeedPage(
+			ctx, opts, nextURL, page == 0 && opts.discovery)
 		if err != nil {
 			if mode == paginationWordPress && isMissingWordPressPage(err) {
 				break
@@ -258,56 +277,49 @@ func fetchFeedPagesSince(
 	return items, nil
 }
 
-func fetchFeedPage(ctx context.Context, client *http.Client, feedURL string, allowDiscovery bool) ([]Item, string, string, bool, error) {
-	body, sourceURL, contentType, err := fetchFeedDocument(ctx, client, feedURL)
+func fetchFeedPage(ctx context.Context, opts *options, feedURL string, allowDiscovery bool) ([]Item, string, string, bool, error) {
+	body, sourceURL, contentType, err := fetchFeedDocument(ctx, opts, feedURL)
 	if err != nil {
 		return nil, "", "", false, err
 	}
 	items, generator, parseErr := parseFeedDetails(body, sourceURL)
 	if parseErr != nil {
 		if !allowDiscovery {
-			return nil, "", "", false, parseErr
+			return nil, "", "", false, notFeed(parseErr)
 		}
 		links, discoveryErr := feediscovery.FindAll(bytes.NewReader(body), sourceURL, contentType)
 		if discoveryErr != nil {
-			return nil, "", "", false, fmt.Errorf("%w; discover feed links: %w", parseErr, discoveryErr)
+			return nil, "", "", false, notFeed(
+				fmt.Errorf("%w; discover feed links: %w", parseErr, discoveryErr))
 		}
 		if len(links) == 0 {
-			return nil, "", "", false, parseErr
+			return nil, "", "", false, noFeedFound(parseErr)
 		}
-		body, sourceURL, _, err = fetchFeedDocument(ctx, client, links[0].URL)
+		body, sourceURL, _, err = fetchFeedDocument(ctx, opts, links[0].URL)
 		if err != nil {
 			return nil, "", "", false, err
 		}
 		items, generator, err = parseFeedDetails(body, sourceURL)
 		if err != nil {
-			return nil, "", "", false, err
+			return nil, "", "", false, notFeed(err)
 		}
 	}
 	nextURL, _ := nextPageURL(body, sourceURL)
 	return items, sourceURL, nextURL, isWordPressGenerator(generator), nil
 }
 
-func fetchFeedDocument(ctx context.Context, client *http.Client, feedURL string) ([]byte, string, string, error) {
-	parsedURL, err := url.ParseRequestURI(feedURL)
-	if err != nil || parsedURL.Host == "" ||
-		(parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
-		if err == nil {
-			err = fmt.Errorf("must be an absolute HTTP or HTTPS URL")
-		}
+func fetchFeedDocument(ctx context.Context, opts *options, feedURL string) ([]byte, string, string, error) {
+	if err := validateHTTPURL(feedURL); err != nil {
 		return nil, "", "", fmt.Errorf("invalid feed URL %q: %w", displayURL(feedURL), err)
-	}
-	if parsedURL.User != nil {
-		return nil, "", "", fmt.Errorf("invalid feed URL %q: userinfo is not allowed", displayURL(feedURL))
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feedURL, nil)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("create request for %q: %w", displayURL(feedURL), err)
 	}
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", opts.userAgent)
 	req.Header.Set("Accept", "application/feed+json, application/json, application/atom+xml, application/rss+xml, application/rdf+xml, application/xml, text/xml, */*;q=0.1")
 
-	resp, err := doRequest(client, req)
+	resp, err := doRequest(opts.client, req)
 	if err != nil {
 		var urlErr *url.Error
 		if errors.As(err, &urlErr) {
@@ -320,21 +332,18 @@ func fetchFeedDocument(ctx context.Context, client *http.Client, feedURL string)
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-		return nil, "", "", &httpStatusError{
-			url:        feedURL,
-			status:     resp.Status,
-			statusCode: resp.StatusCode,
+		return nil, "", "", &StatusError{
+			URL:        displayURL(feedURL),
+			Status:     resp.Status,
+			StatusCode: resp.StatusCode,
 		}
 	}
 	if resp.ContentLength > maxFeedSize {
 		return nil, "", "", fmt.Errorf("read %q: feed exceeds %d MiB limit", displayURL(feedURL), maxFeedSize>>20)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxFeedSize+1))
+	body, err := readFeedDocument(resp.Body, feedURL)
 	if err != nil {
-		return nil, "", "", fmt.Errorf("read %q: %w", displayURL(feedURL), err)
-	}
-	if len(body) > maxFeedSize {
-		return nil, "", "", fmt.Errorf("read %q: feed exceeds %d MiB limit", displayURL(feedURL), maxFeedSize>>20)
+		return nil, "", "", err
 	}
 	sourceURL := feedURL
 	if resp.Request != nil && resp.Request.URL != nil {
@@ -637,9 +646,9 @@ func nextWordPressPageURL(value string, currentPage int) (string, int) {
 }
 
 func isMissingWordPressPage(err error) bool {
-	var statusErr *httpStatusError
+	var statusErr *StatusError
 	return errors.As(err, &statusErr) &&
-		(statusErr.statusCode == http.StatusNotFound || statusErr.statusCode == http.StatusGone)
+		(statusErr.StatusCode == http.StatusNotFound || statusErr.StatusCode == http.StatusGone)
 }
 
 func normalizeAttachment(attachment Attachment) (Attachment, bool) {

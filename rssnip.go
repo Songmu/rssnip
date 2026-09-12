@@ -111,28 +111,27 @@ func runInLocation(
 	}
 
 	client := &http.Client{Transport: newPoliteTransport(nil)}
-	return fetchFeeds(ctx, client, urls, *maxPages, since, *preferUpdated,
+	fetchOptions := []Option{
+		WithHTTPClient(client),
+		WithMaxPages(*maxPages),
+		WithPreferUpdated(*preferUpdated),
+	}
+	if since != nil {
+		fetchOptions = append(fetchOptions, WithSince(*since))
+	}
+	if until != nil {
+		fetchOptions = append(fetchOptions, WithUntil(*until))
+	}
+	return fetchFeeds(ctx, urls, fetchOptions,
 		func(feedItems []Item) error {
-			filtered := feedItems
-			if since != nil || until != nil {
-				filtered = feedItems[:0]
-				for _, item := range feedItems {
-					if withinPeriod(item, since, until, *preferUpdated) {
-						filtered = append(filtered, item)
-					}
-				}
-			}
-			return writeItemsWithCodeContextAndFeed(ctx, outStream, filtered, code, *rawOutput, *withFeed)
+			return writeItemsWithCodeContextAndFeed(ctx, outStream, feedItems, code, *rawOutput, *withFeed)
 		})
 }
 
 func fetchFeeds(
 	ctx context.Context,
-	client *http.Client,
 	urls []string,
-	maxPages int,
-	since *time.Time,
-	preferUpdated bool,
+	fetchOptions []Option,
 	consume func([]Item) error,
 ) error {
 	type result struct {
@@ -147,8 +146,7 @@ func fetchFeeds(
 	for range min(maxConcurrentFetches, len(urls)) {
 		workers.Go(func() {
 			for index := range jobs {
-				items, err := fetchFeedPagesSince(
-					fetchContext, client, urls[index], maxPages, since, preferUpdated)
+				items, err := Fetch(fetchContext, urls[index], fetchOptions...)
 				select {
 				case results <- result{index: index, items: items, err: err}:
 				case <-fetchContext.Done():
