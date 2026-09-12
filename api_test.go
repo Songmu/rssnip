@@ -285,7 +285,7 @@ func TestParseReadsFeedWithoutNetworkAccess(t *testing.T) {
 	}
 }
 
-func TestParseResolvesJSONFeedURLs(t *testing.T) {
+func TestParsePreservesJSONFeedURLs(t *testing.T) {
 	t.Parallel()
 	document := `{
 	  "version": "https://jsonfeed.org/version/1.1",
@@ -299,6 +299,8 @@ func TestParseResolvesJSONFeedURLs(t *testing.T) {
 	    "banner_image": "/banners/1.png",
 	    "authors": [{"name": "Item Author", "url": "/authors/item", "avatar": "/item.png"}],
 	    "attachments": [{"url": "/audio/1.mp3", "mime_type": "audio/mpeg"}]
+	  }, {
+	    "url": "/posts/2"
 	  }]
 	}`
 	items, err := rssnip.Parse(strings.NewReader(document),
@@ -306,23 +308,26 @@ func TestParseResolvesJSONFeedURLs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if len(items) != 1 {
-		t.Fatalf("items = %v, want one item", itemIDs(items))
+	if len(items) != 2 {
+		t.Fatalf("items = %v, want two items", itemIDs(items))
 	}
 	item := items[0]
 	for name, values := range map[string]struct{ got, want string }{
-		"home page":  {item.Feed.HomePageURL, "https://example.com/blog"},
-		"item":       {item.URL, "https://example.com/posts/1"},
-		"external":   {item.ExternalURL, "https://example.com/elsewhere/1"},
-		"image":      {item.Image, "https://example.com/images/1.png"},
-		"banner":     {item.BannerImage, "https://example.com/banners/1.png"},
-		"author URL": {item.Authors[0].URL, "https://example.com/authors/item"},
-		"avatar":     {item.Authors[0].Avatar, "https://example.com/item.png"},
-		"attachment": {item.Attachments[0].URL, "https://example.com/audio/1.mp3"},
+		"home page":  {item.Feed.HomePageURL, "/blog"},
+		"item":       {item.URL, "/posts/1"},
+		"external":   {item.ExternalURL, "/elsewhere/1"},
+		"image":      {item.Image, "/images/1.png"},
+		"banner":     {item.BannerImage, "/banners/1.png"},
+		"author URL": {item.Authors[0].URL, "/authors/item"},
+		"avatar":     {item.Authors[0].Avatar, "/item.png"},
+		"attachment": {item.Attachments[0].URL, "/audio/1.mp3"},
 	} {
 		if values.got != values.want {
 			t.Errorf("%s URL = %q, want %q", name, values.got, values.want)
 		}
+	}
+	if items[1].ID != "/posts/2" {
+		t.Errorf("fallback ID = %q, want the original relative URL", items[1].ID)
 	}
 }
 

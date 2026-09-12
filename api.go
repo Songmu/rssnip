@@ -204,8 +204,9 @@ func Fetch(ctx context.Context, feedURL string, opts ...Option) ([]Item, error) 
 //
 // Parse performs no network access and follows no pagination links, so
 // WithHTTPClient, WithUserAgent, WithMaxPages, and WithDiscovery have no
-// effect. sourceURL must be an absolute HTTP or HTTPS URL without userinfo; it
-// resolves relative URLs in the document and becomes each item's _feed.feed_url.
+// effect. sourceURL must be an absolute HTTP or HTTPS URL without userinfo. It
+// resolves relative URLs in XML feeds and becomes each item's _feed.feed_url;
+// JSON Feed URL fields are preserved as written.
 // contentType is the document's HTTP Content-Type header and may be empty when
 // unknown; RSS, Atom, RDF, and JSON Feed documents are recognized from their
 // contents, and the character encoding of XML feeds comes from their byte order

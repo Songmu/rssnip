@@ -16,7 +16,7 @@ func ExampleParse() {
 	  "version": "https://jsonfeed.org/version/1.1",
 	  "title": "Example",
 	  "items": [
-	    {"id": "1", "url": "/posts/1", "title": "Hello", "date_published": "2026-01-02T03:04:05Z"}
+	    {"id": "1", "url": "https://example.com/posts/1", "title": "Hello", "date_published": "2026-01-02T03:04:05Z"}
 	  ]
 	}`
 	items, err := rssnip.Parse(

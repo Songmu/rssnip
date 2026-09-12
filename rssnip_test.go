@@ -564,6 +564,32 @@ func TestRunSinceStopsOrderedPagination(t *testing.T) {
 	}
 }
 
+func TestRunPreservesRelativeJSONFeedURLs(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/feed+json")
+		fmt.Fprint(w, `{
+		  "version":"https://jsonfeed.org/version/1.1",
+		  "items":[{"url":"/posts/1"}]
+		}`)
+	}))
+	t.Cleanup(server.Close)
+
+	var stdout, stderr bytes.Buffer
+	err := Run(context.Background(), []string{
+		"--all", "--jq", "[.id, .url] | @tsv", "-r", server.URL,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := stdout.String(), "/posts/1\t/posts/1\n"; got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q", stderr.String())
+	}
+}
+
 func TestRunErrors(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

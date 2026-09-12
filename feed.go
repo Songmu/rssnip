@@ -479,14 +479,16 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 	}
 	info := FeedInfo{
 		Title:       feed.Title,
-		HomePageURL: resolveURL(sourceURL, feed.HomePageURL),
+		HomePageURL: feed.HomePageURL,
 		FeedURL:     sourceURL,
 	}
-	feedAuthors := jsonFeedAuthors(sourceURL, feed.Authors, feed.Author)
+	feedAuthors := append([]Author(nil), feed.Authors...)
+	if len(feedAuthors) == 0 && feed.Author != nil {
+		feedAuthors = append(feedAuthors, *feed.Author)
+	}
 	items := make([]Item, 0, len(feed.Items))
 	for _, source := range feed.Items {
-		itemURL := resolveURL(sourceURL, source.URL)
-		id := firstNonEmpty(source.ID, itemURL)
+		id := firstNonEmpty(source.ID, source.URL)
 		if id == "" {
 			var err error
 			id, err = generatedJSONFeedID(source)
@@ -494,20 +496,23 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 				return nil, false, fmt.Errorf("generate item ID for feed %q: %w", sourceURL, err)
 			}
 		}
-		authors := jsonFeedAuthors(sourceURL, source.Authors, source.Author)
+		authors := append([]Author(nil), source.Authors...)
+		if len(authors) == 0 && source.Author != nil {
+			authors = append(authors, *source.Author)
+		}
 		if len(authors) == 0 {
 			authors = append(authors, feedAuthors...)
 		}
 		item := Item{
 			ID:            id,
-			URL:           itemURL,
-			ExternalURL:   resolveURL(sourceURL, source.ExternalURL),
+			URL:           source.URL,
+			ExternalURL:   source.ExternalURL,
 			Title:         source.Title,
 			ContentHTML:   source.ContentHTML,
 			ContentText:   source.ContentText,
 			Summary:       source.Summary,
-			Image:         resolveURL(sourceURL, source.Image),
-			BannerImage:   resolveURL(sourceURL, source.BannerImage),
+			Image:         source.Image,
+			BannerImage:   source.BannerImage,
 			DatePublished: normalizeDate(source.DatePublished),
 			DateModified:  normalizeDate(source.DateModified),
 			Authors:       authors,
@@ -515,27 +520,13 @@ func parseJSONFeed(body []byte, sourceURL string) ([]Item, bool, error) {
 			Feed:          info,
 		}
 		for _, attachment := range source.Attachments {
-			candidate := Attachment(attachment)
-			candidate.URL = resolveURL(sourceURL, candidate.URL)
-			if normalized, ok := normalizeAttachment(candidate); ok {
+			if normalized, ok := normalizeAttachment(Attachment(attachment)); ok {
 				item.Attachments = append(item.Attachments, normalized)
 			}
 		}
 		items = append(items, item)
 	}
 	return items, true, nil
-}
-
-func jsonFeedAuthors(baseURL string, authors []Author, legacy *Author) []Author {
-	normalized := append([]Author(nil), authors...)
-	if len(normalized) == 0 && legacy != nil {
-		normalized = append(normalized, *legacy)
-	}
-	for i := range normalized {
-		normalized[i].URL = resolveURL(baseURL, normalized[i].URL)
-		normalized[i].Avatar = resolveURL(baseURL, normalized[i].Avatar)
-	}
-	return normalized
 }
 
 func nextPageURL(body []byte, sourceURL string) (string, error) {
